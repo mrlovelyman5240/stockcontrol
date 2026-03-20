@@ -1,4 +1,5 @@
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -6,10 +7,11 @@ import os
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List
+from typing import List, Optional
 import uuid
-from datetime import datetime, timezone
-
+from datetime import datetime, timezone, timedelta
+import jwt
+import bcrypt
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -19,54 +21,777 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
-# Create the main app without a prefix
-app = FastAPI()
+# JWT Configuration
+JWT_SECRET = os.environ.get('JWT_SECRET', 'logiflow-secret-key-2024')
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRATION_HOURS = 24
 
-# Create a router with the /api prefix
+# Create the main app
+app = FastAPI(title="LogiFlow Pro API")
+
+# Create router with /api prefix
 api_router = APIRouter(prefix="/api")
 
+security = HTTPBearer()
 
-# Define Models
-class StatusCheck(BaseModel):
-    model_config = ConfigDict(extra="ignore")  # Ignore MongoDB's _id field
-    
+# ============== MODELS ==============
+
+class UserBase(BaseModel):
+    username: str
+    role: str  # boss, customer_service, driver
+
+class UserCreate(UserBase):
+    password: str
+
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
+class UserResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str
+    username: str
+    role: str
+    created_at: str
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+
+class InventoryItem(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    name: str
+    price: float
+    stock: int
+    bogo_enabled: bool = False  # Buy 1 Get 1 Free
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
-class StatusCheckCreate(BaseModel):
-    client_name: str
+class InventoryCreate(BaseModel):
+    name: str
+    price: float
+    stock: int
+    bogo_enabled: bool = False
 
-# Add your routes to the router instead of directly to app
-@api_router.get("/")
-async def root():
-    return {"message": "Hello World"}
+class InventoryUpdate(BaseModel):
+    name: Optional[str] = None
+    price: Optional[float] = None
+    stock: Optional[int] = None
+    bogo_enabled: Optional[bool] = None
 
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.model_dump()
-    status_obj = StatusCheck(**status_dict)
+class OrderItem(BaseModel):
+    item_id: str
+    name: str
+    price: float
+    quantity: int
+    is_free_gift: bool = False
+
+class Order(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    address: str
+    items: List[OrderItem]
+    total: float
+    status: str = "pending"  # pending, assigned, in_transit, delivered, cancelled
+    driver_id: Optional[str] = None
+    driver_name: Optional[str] = None
+    created_by: str
+    created_by_name: str
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    delivered_at: Optional[str] = None
+
+class OrderCreate(BaseModel):
+    address: str
+    items: List[OrderItem]
+    total: float
+
+class OrderUpdate(BaseModel):
+    status: Optional[str] = None
+    driver_id: Optional[str] = None
+    driver_name: Optional[str] = None
+
+class Payment(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    driver_id: str
+    driver_name: str
+    amount: float
+    status: str = "pending"  # pending, approved, rejected
+    submitted_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    approved_at: Optional[str] = None
+    approved_by: Optional[str] = None
+
+class PaymentCreate(BaseModel):
+    amount: float
+
+class DriverHours(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    driver_id: str
+    date: str  # YYYY-MM-DD
+    hours: float
+    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+class DriverHoursCreate(BaseModel):
+    date: str
+    hours: float
+
+class Settings(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = "global_settings"
+    payment_method: str = "per_package"  # hourly or per_package
+    hourly_rate: float = 15.0
+    per_package_rate: float = 5.0
+    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_by: Optional[str] = None
+
+class SettingsUpdate(BaseModel):
+    payment_method: Optional[str] = None
+    hourly_rate: Optional[float] = None
+    per_package_rate: Optional[float] = None
+
+class AuditLog(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    action: str  # delete, update
+    entity_type: str  # order, inventory
+    entity_id: str
+    entity_name: str
+    performed_by: str
+    performed_by_name: str
+    details: str
+    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+# ============== HELPER FUNCTIONS ==============
+
+def hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
+
+def verify_password(password: str, hashed: str) -> bool:
+    return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
+
+def create_token(user_id: str, username: str, role: str) -> str:
+    payload = {
+        "user_id": user_id,
+        "username": username,
+        "role": role,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRATION_HOURS)
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    try:
+        token = credentials.credentials
+        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        return payload
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+def require_role(allowed_roles: List[str]):
+    async def role_checker(user = Depends(get_current_user)):
+        if user["role"] not in allowed_roles:
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+        return user
+    return role_checker
+
+async def create_audit_log(action: str, entity_type: str, entity_id: str, entity_name: str, user_id: str, user_name: str, details: str):
+    log = AuditLog(
+        action=action,
+        entity_type=entity_type,
+        entity_id=entity_id,
+        entity_name=entity_name,
+        performed_by=user_id,
+        performed_by_name=user_name,
+        details=details
+    )
+    await db.audit_logs.insert_one(log.model_dump())
+
+# ============== AUTH ROUTES ==============
+
+@api_router.post("/auth/register", response_model=TokenResponse)
+async def register(user_data: UserCreate):
+    # Check if username exists
+    existing = await db.users.find_one({"username": user_data.username}, {"_id": 0})
+    if existing:
+        raise HTTPException(status_code=400, detail="Username already exists")
     
-    # Convert to dict and serialize datetime to ISO string for MongoDB
-    doc = status_obj.model_dump()
-    doc['timestamp'] = doc['timestamp'].isoformat()
+    # Validate role
+    if user_data.role not in ["boss", "customer_service", "driver"]:
+        raise HTTPException(status_code=400, detail="Invalid role")
     
-    _ = await db.status_checks.insert_one(doc)
-    return status_obj
+    user_id = str(uuid.uuid4())
+    user_doc = {
+        "id": user_id,
+        "username": user_data.username,
+        "password": hash_password(user_data.password),
+        "role": user_data.role,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.users.insert_one(user_doc)
+    
+    token = create_token(user_id, user_data.username, user_data.role)
+    return TokenResponse(
+        access_token=token,
+        user=UserResponse(
+            id=user_id,
+            username=user_data.username,
+            role=user_data.role,
+            created_at=user_doc["created_at"]
+        )
+    )
 
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    # Exclude MongoDB's _id field from the query results
-    status_checks = await db.status_checks.find({}, {"_id": 0}).to_list(1000)
+@api_router.post("/auth/login", response_model=TokenResponse)
+async def login(credentials: UserLogin):
+    user = await db.users.find_one({"username": credentials.username}, {"_id": 0})
+    if not user or not verify_password(credentials.password, user["password"]):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
     
-    # Convert ISO string timestamps back to datetime objects
-    for check in status_checks:
-        if isinstance(check['timestamp'], str):
-            check['timestamp'] = datetime.fromisoformat(check['timestamp'])
-    
-    return status_checks
+    token = create_token(user["id"], user["username"], user["role"])
+    return TokenResponse(
+        access_token=token,
+        user=UserResponse(
+            id=user["id"],
+            username=user["username"],
+            role=user["role"],
+            created_at=user["created_at"]
+        )
+    )
 
-# Include the router in the main app
+@api_router.get("/auth/me", response_model=UserResponse)
+async def get_me(user = Depends(get_current_user)):
+    user_doc = await db.users.find_one({"id": user["user_id"]}, {"_id": 0, "password": 0})
+    if not user_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+    return UserResponse(**user_doc)
+
+# ============== USERS ROUTES ==============
+
+@api_router.get("/users/drivers", response_model=List[UserResponse])
+async def get_drivers(user = Depends(require_role(["boss", "customer_service"]))):
+    drivers = await db.users.find({"role": "driver"}, {"_id": 0, "password": 0}).to_list(100)
+    return [UserResponse(**d) for d in drivers]
+
+# ============== INVENTORY ROUTES ==============
+
+@api_router.get("/inventory", response_model=List[InventoryItem])
+async def get_inventory(user = Depends(get_current_user)):
+    items = await db.inventory.find({}, {"_id": 0}).to_list(1000)
+    return [InventoryItem(**item) for item in items]
+
+@api_router.post("/inventory", response_model=InventoryItem)
+async def create_inventory_item(item: InventoryCreate, user = Depends(require_role(["boss", "customer_service"]))):
+    inventory_item = InventoryItem(**item.model_dump())
+    await db.inventory.insert_one(inventory_item.model_dump())
+    return inventory_item
+
+@api_router.put("/inventory/{item_id}", response_model=InventoryItem)
+async def update_inventory_item(item_id: str, update: InventoryUpdate, user = Depends(require_role(["boss", "customer_service"]))):
+    existing = await db.inventory.find_one({"id": item_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Item not found")
+    
+    update_data = {k: v for k, v in update.model_dump().items() if v is not None}
+    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    
+    await db.inventory.update_one({"id": item_id}, {"$set": update_data})
+    
+    # Log if customer service
+    if user["role"] == "customer_service":
+        await create_audit_log(
+            action="update",
+            entity_type="inventory",
+            entity_id=item_id,
+            entity_name=existing["name"],
+            user_id=user["user_id"],
+            user_name=user["username"],
+            details=f"Updated fields: {list(update_data.keys())}"
+        )
+    
+    updated = await db.inventory.find_one({"id": item_id}, {"_id": 0})
+    return InventoryItem(**updated)
+
+@api_router.delete("/inventory/{item_id}")
+async def delete_inventory_item(item_id: str, user = Depends(require_role(["boss", "customer_service"]))):
+    existing = await db.inventory.find_one({"id": item_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Item not found")
+    
+    await db.inventory.delete_one({"id": item_id})
+    
+    # Log if customer service
+    if user["role"] == "customer_service":
+        await create_audit_log(
+            action="delete",
+            entity_type="inventory",
+            entity_id=item_id,
+            entity_name=existing["name"],
+            user_id=user["user_id"],
+            user_name=user["username"],
+            details=f"Deleted inventory item: {existing['name']}"
+        )
+    
+    return {"message": "Item deleted"}
+
+# ============== ORDERS ROUTES ==============
+
+@api_router.get("/orders", response_model=List[Order])
+async def get_orders(
+    status: Optional[str] = None,
+    driver_id: Optional[str] = None,
+    date: Optional[str] = None,
+    user = Depends(get_current_user)
+):
+    query = {}
+    
+    # Drivers can only see their own orders
+    if user["role"] == "driver":
+        query["driver_id"] = user["user_id"]
+    elif driver_id:
+        query["driver_id"] = driver_id
+    
+    if status:
+        query["status"] = status
+    
+    if date:
+        # Filter by date (orders created on that date)
+        query["created_at"] = {"$regex": f"^{date}"}
+    
+    orders = await db.orders.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return [Order(**order) for order in orders]
+
+@api_router.get("/orders/today", response_model=List[Order])
+async def get_today_orders(user = Depends(get_current_user)):
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    query = {"created_at": {"$regex": f"^{today}"}}
+    
+    if user["role"] == "driver":
+        query["driver_id"] = user["user_id"]
+    
+    orders = await db.orders.find(query, {"_id": 0}).sort("created_at", -1).to_list(1000)
+    return [Order(**order) for order in orders]
+
+@api_router.post("/orders", response_model=Order)
+async def create_order(order_data: OrderCreate, user = Depends(require_role(["boss", "customer_service"]))):
+    # Validate and update inventory
+    for item in order_data.items:
+        if item.is_free_gift:
+            continue  # Don't deduct stock for free gifts
+        inv_item = await db.inventory.find_one({"id": item.item_id}, {"_id": 0})
+        if not inv_item:
+            raise HTTPException(status_code=400, detail=f"Item {item.name} not found")
+        if inv_item["stock"] < item.quantity:
+            raise HTTPException(status_code=400, detail=f"Insufficient stock for {item.name}")
+    
+    # Deduct inventory
+    for item in order_data.items:
+        if not item.is_free_gift:
+            await db.inventory.update_one(
+                {"id": item.item_id},
+                {"$inc": {"stock": -item.quantity}}
+            )
+    
+    order = Order(
+        address=order_data.address,
+        items=[OrderItem(**i.model_dump()) for i in order_data.items],
+        total=order_data.total,
+        created_by=user["user_id"],
+        created_by_name=user["username"]
+    )
+    await db.orders.insert_one(order.model_dump())
+    return order
+
+@api_router.put("/orders/{order_id}", response_model=Order)
+async def update_order(order_id: str, update: OrderUpdate, user = Depends(get_current_user)):
+    existing = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    update_data = {k: v for k, v in update.model_dump().items() if v is not None}
+    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    
+    # If marking as delivered, set delivered_at
+    if update.status == "delivered":
+        update_data["delivered_at"] = datetime.now(timezone.utc).isoformat()
+    
+    await db.orders.update_one({"id": order_id}, {"$set": update_data})
+    
+    updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    return Order(**updated)
+
+@api_router.delete("/orders/{order_id}")
+async def delete_order(order_id: str, user = Depends(require_role(["boss", "customer_service"]))):
+    existing = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    # Restore inventory
+    for item in existing["items"]:
+        if not item.get("is_free_gift", False):
+            await db.inventory.update_one(
+                {"id": item["item_id"]},
+                {"$inc": {"stock": item["quantity"]}}
+            )
+    
+    await db.orders.delete_one({"id": order_id})
+    
+    # Log if customer service
+    if user["role"] == "customer_service":
+        await create_audit_log(
+            action="delete",
+            entity_type="order",
+            entity_id=order_id,
+            entity_name=f"Order to {existing['address']}",
+            user_id=user["user_id"],
+            user_name=user["username"],
+            details=f"Deleted order worth ${existing['total']}"
+        )
+    
+    return {"message": "Order deleted"}
+
+# ============== PAYMENTS ROUTES ==============
+
+@api_router.get("/payments", response_model=List[Payment])
+async def get_payments(
+    driver_id: Optional[str] = None,
+    status: Optional[str] = None,
+    user = Depends(get_current_user)
+):
+    query = {}
+    
+    if user["role"] == "driver":
+        query["driver_id"] = user["user_id"]
+    elif driver_id:
+        query["driver_id"] = driver_id
+    
+    if status:
+        query["status"] = status
+    
+    payments = await db.payments.find(query, {"_id": 0}).sort("submitted_at", -1).to_list(1000)
+    return [Payment(**p) for p in payments]
+
+@api_router.post("/payments", response_model=Payment)
+async def submit_payment(payment_data: PaymentCreate, user = Depends(require_role(["driver"]))):
+    payment = Payment(
+        driver_id=user["user_id"],
+        driver_name=user["username"],
+        amount=payment_data.amount
+    )
+    await db.payments.insert_one(payment.model_dump())
+    return payment
+
+@api_router.put("/payments/{payment_id}/approve", response_model=Payment)
+async def approve_payment(payment_id: str, user = Depends(require_role(["boss"]))):
+    existing = await db.payments.find_one({"id": payment_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    
+    await db.payments.update_one(
+        {"id": payment_id},
+        {"$set": {
+            "status": "approved",
+            "approved_at": datetime.now(timezone.utc).isoformat(),
+            "approved_by": user["username"]
+        }}
+    )
+    
+    updated = await db.payments.find_one({"id": payment_id}, {"_id": 0})
+    return Payment(**updated)
+
+@api_router.put("/payments/{payment_id}/reject", response_model=Payment)
+async def reject_payment(payment_id: str, user = Depends(require_role(["boss"]))):
+    existing = await db.payments.find_one({"id": payment_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    
+    await db.payments.update_one(
+        {"id": payment_id},
+        {"$set": {"status": "rejected"}}
+    )
+    
+    updated = await db.payments.find_one({"id": payment_id}, {"_id": 0})
+    return Payment(**updated)
+
+# ============== DRIVER HOURS ROUTES ==============
+
+@api_router.get("/driver-hours", response_model=List[DriverHours])
+async def get_driver_hours(
+    date: Optional[str] = None,
+    user = Depends(get_current_user)
+):
+    query = {"driver_id": user["user_id"]} if user["role"] == "driver" else {}
+    if date:
+        query["date"] = date
+    
+    hours = await db.driver_hours.find(query, {"_id": 0}).to_list(1000)
+    return [DriverHours(**h) for h in hours]
+
+@api_router.post("/driver-hours", response_model=DriverHours)
+async def log_driver_hours(hours_data: DriverHoursCreate, user = Depends(require_role(["driver"]))):
+    # Check if entry exists for this date
+    existing = await db.driver_hours.find_one({
+        "driver_id": user["user_id"],
+        "date": hours_data.date
+    }, {"_id": 0})
+    
+    if existing:
+        # Update existing
+        await db.driver_hours.update_one(
+            {"id": existing["id"]},
+            {"$set": {"hours": hours_data.hours}}
+        )
+        updated = await db.driver_hours.find_one({"id": existing["id"]}, {"_id": 0})
+        return DriverHours(**updated)
+    
+    # Create new
+    driver_hours = DriverHours(
+        driver_id=user["user_id"],
+        date=hours_data.date,
+        hours=hours_data.hours
+    )
+    await db.driver_hours.insert_one(driver_hours.model_dump())
+    return driver_hours
+
+# ============== SETTINGS ROUTES ==============
+
+@api_router.get("/settings", response_model=Settings)
+async def get_settings(user = Depends(get_current_user)):
+    settings = await db.settings.find_one({"id": "global_settings"}, {"_id": 0})
+    if not settings:
+        # Create default settings
+        default = Settings()
+        await db.settings.insert_one(default.model_dump())
+        return default
+    return Settings(**settings)
+
+@api_router.put("/settings", response_model=Settings)
+async def update_settings(update: SettingsUpdate, user = Depends(require_role(["boss"]))):
+    update_data = {k: v for k, v in update.model_dump().items() if v is not None}
+    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    update_data["updated_by"] = user["username"]
+    
+    await db.settings.update_one(
+        {"id": "global_settings"},
+        {"$set": update_data},
+        upsert=True
+    )
+    
+    settings = await db.settings.find_one({"id": "global_settings"}, {"_id": 0})
+    return Settings(**settings)
+
+# ============== AUDIT LOGS ROUTES ==============
+
+@api_router.get("/audit-logs", response_model=List[AuditLog])
+async def get_audit_logs(user = Depends(require_role(["boss"]))):
+    logs = await db.audit_logs.find({}, {"_id": 0}).sort("timestamp", -1).to_list(1000)
+    return [AuditLog(**log) for log in logs]
+
+# ============== STATISTICS ROUTES ==============
+
+@api_router.get("/stats/boss")
+async def get_boss_stats(user = Depends(require_role(["boss"]))):
+    # Get all orders
+    orders = await db.orders.find({}, {"_id": 0}).to_list(10000)
+    
+    # Calculate totals
+    total_order_value = sum(o["total"] for o in orders)
+    delivered_orders = [o for o in orders if o["status"] == "delivered"]
+    delivered_value = sum(o["total"] for o in delivered_orders)
+    
+    # Get settings for payment calculation
+    settings = await db.settings.find_one({"id": "global_settings"}, {"_id": 0})
+    if not settings:
+        settings = Settings().model_dump()
+    
+    # Calculate staff payments
+    total_staff_payments = 0.0
+    
+    if settings["payment_method"] == "per_package":
+        # Count delivered orders per driver
+        total_staff_payments = len(delivered_orders) * settings["per_package_rate"]
+    else:
+        # Get all logged hours
+        hours = await db.driver_hours.find({}, {"_id": 0}).to_list(10000)
+        total_hours = sum(h["hours"] for h in hours)
+        total_staff_payments = total_hours * settings["hourly_rate"]
+    
+    # Get approved payments
+    approved_payments = await db.payments.find({"status": "approved"}, {"_id": 0}).to_list(10000)
+    total_collected = sum(p["amount"] for p in approved_payments)
+    
+    # Calculate pending collections per driver
+    drivers = await db.users.find({"role": "driver"}, {"_id": 0, "password": 0}).to_list(100)
+    pending_collections = []
+    
+    for driver in drivers:
+        driver_orders = [o for o in delivered_orders if o.get("driver_id") == driver["id"]]
+        driver_sales = sum(o["total"] for o in driver_orders)
+        
+        # Calculate driver's earnings
+        if settings["payment_method"] == "per_package":
+            driver_earnings = len(driver_orders) * settings["per_package_rate"]
+        else:
+            driver_hours = await db.driver_hours.find({"driver_id": driver["id"]}, {"_id": 0}).to_list(1000)
+            total_hours = sum(h["hours"] for h in driver_hours)
+            driver_earnings = total_hours * settings["hourly_rate"]
+        
+        # What driver owes (sales - earnings)
+        holding = driver_sales - driver_earnings
+        
+        # Subtract approved payments
+        driver_approved = await db.payments.find({
+            "driver_id": driver["id"],
+            "status": "approved"
+        }, {"_id": 0}).to_list(1000)
+        total_driver_paid = sum(p["amount"] for p in driver_approved)
+        
+        pending_amount = max(0, holding - total_driver_paid)
+        
+        if pending_amount > 0:
+            pending_collections.append({
+                "driver_id": driver["id"],
+                "driver_name": driver["username"],
+                "amount": pending_amount,
+                "total_sales": driver_sales,
+                "driver_earnings": driver_earnings
+            })
+    
+    # Get pending payment submissions
+    pending_payments = await db.payments.find({"status": "pending"}, {"_id": 0}).to_list(100)
+    
+    return {
+        "total_order_value": total_order_value,
+        "total_staff_payments": total_staff_payments,
+        "net_profit": delivered_value - total_staff_payments,
+        "total_collected": total_collected,
+        "pending_collections": pending_collections,
+        "pending_payments": [Payment(**p).model_dump() for p in pending_payments],
+        "total_orders": len(orders),
+        "delivered_orders": len(delivered_orders),
+        "pending_orders": len([o for o in orders if o["status"] == "pending"])
+    }
+
+@api_router.get("/stats/driver")
+async def get_driver_stats(date: Optional[str] = None, user = Depends(require_role(["driver"]))):
+    # Get settings
+    settings = await db.settings.find_one({"id": "global_settings"}, {"_id": 0})
+    if not settings:
+        settings = Settings().model_dump()
+    
+    # Build query for orders
+    query = {"driver_id": user["user_id"]}
+    if date:
+        query["delivered_at"] = {"$regex": f"^{date}"}
+    
+    # Get driver's delivered orders
+    delivered_orders = await db.orders.find({
+        **query,
+        "status": "delivered"
+    }, {"_id": 0}).to_list(10000)
+    
+    total_sales = sum(o["total"] for o in delivered_orders)
+    packages_delivered = len(delivered_orders)
+    
+    # Calculate earnings
+    if settings["payment_method"] == "per_package":
+        earnings = packages_delivered * settings["per_package_rate"]
+        hours_logged = None
+    else:
+        # Get hours for the date
+        hours_query = {"driver_id": user["user_id"]}
+        if date:
+            hours_query["date"] = date
+        
+        hours_records = await db.driver_hours.find(hours_query, {"_id": 0}).to_list(1000)
+        hours_logged = sum(h["hours"] for h in hours_records)
+        earnings = hours_logged * settings["hourly_rate"]
+    
+    # Calculate holding (to boss)
+    holding = total_sales - earnings
+    
+    # Get approved payments
+    payment_query = {"driver_id": user["user_id"], "status": "approved"}
+    approved_payments = await db.payments.find(payment_query, {"_id": 0}).to_list(1000)
+    total_paid = sum(p["amount"] for p in approved_payments)
+    
+    # Pending amount
+    pending_to_boss = max(0, holding - total_paid)
+    
+    # Today's stats
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today_orders = await db.orders.find({
+        "driver_id": user["user_id"],
+        "created_at": {"$regex": f"^{today}"}
+    }, {"_id": 0}).to_list(1000)
+    
+    today_delivered = [o for o in today_orders if o["status"] == "delivered"]
+    today_pending = [o for o in today_orders if o["status"] in ["pending", "assigned", "in_transit"]]
+    
+    return {
+        "payment_method": settings["payment_method"],
+        "hourly_rate": settings["hourly_rate"],
+        "per_package_rate": settings["per_package_rate"],
+        "total_sales": total_sales,
+        "packages_delivered": packages_delivered,
+        "hours_logged": hours_logged,
+        "earnings": earnings,
+        "holding": holding,
+        "total_paid": total_paid,
+        "pending_to_boss": pending_to_boss,
+        "today_orders": len(today_orders),
+        "today_delivered": len(today_delivered),
+        "today_pending": len(today_pending),
+        "today_revenue": sum(o["total"] for o in today_delivered)
+    }
+
+# ============== SEED DATA ROUTE ==============
+
+@api_router.post("/seed")
+async def seed_data():
+    # Check if already seeded
+    existing_boss = await db.users.find_one({"username": "boss"}, {"_id": 0})
+    if existing_boss:
+        return {"message": "Data already seeded"}
+    
+    # Create users
+    users = [
+        {"id": str(uuid.uuid4()), "username": "boss", "password": hash_password("boss123"), "role": "boss", "created_at": datetime.now(timezone.utc).isoformat()},
+        {"id": str(uuid.uuid4()), "username": "service1", "password": hash_password("service123"), "role": "customer_service", "created_at": datetime.now(timezone.utc).isoformat()},
+        {"id": str(uuid.uuid4()), "username": "driver1", "password": hash_password("driver123"), "role": "driver", "created_at": datetime.now(timezone.utc).isoformat()},
+        {"id": str(uuid.uuid4()), "username": "driver2", "password": hash_password("driver123"), "role": "driver", "created_at": datetime.now(timezone.utc).isoformat()},
+    ]
+    await db.users.insert_many(users)
+    
+    # Create inventory
+    inventory = [
+        InventoryItem(name="Premium Pizza", price=15.99, stock=50, bogo_enabled=True).model_dump(),
+        InventoryItem(name="Classic Burger", price=9.99, stock=100).model_dump(),
+        InventoryItem(name="Caesar Salad", price=7.99, stock=30).model_dump(),
+        InventoryItem(name="Chicken Wings", price=12.99, stock=45, bogo_enabled=True).model_dump(),
+        InventoryItem(name="Pasta Carbonara", price=14.99, stock=25).model_dump(),
+        InventoryItem(name="Fish & Chips", price=11.99, stock=40).model_dump(),
+        InventoryItem(name="Grilled Steak", price=24.99, stock=20).model_dump(),
+        InventoryItem(name="Veggie Wrap", price=8.99, stock=35).model_dump(),
+    ]
+    await db.inventory.insert_many(inventory)
+    
+    # Create default settings
+    settings = Settings().model_dump()
+    await db.settings.insert_one(settings)
+    
+    return {"message": "Data seeded successfully", "users": [{"username": u["username"], "role": u["role"]} for u in users]}
+
+# ============== HEALTH CHECK ==============
+
+@api_router.get("/health")
+async def health_check():
+    return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+# Include router and middleware
 app.include_router(api_router)
 
 app.add_middleware(

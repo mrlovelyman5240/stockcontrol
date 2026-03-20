@@ -1,0 +1,694 @@
+{
+  "summary": {
+    "tests_run": 24,
+    "tests_passed": 24,
+    "success_rate": 100.0,
+    "failed_test_suites": []
+  },
+  "detailed_results": [
+    {
+      "name": "Health Check",
+      "endpoint": "health",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "data": {
+        "status": "healthy",
+        "timestamp": "2026-03-20T14:27:03.282822+00:00"
+      }
+    },
+    {
+      "name": "Seed Demo Data",
+      "endpoint": "seed",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "data": {
+        "message": "Data already seeded"
+      }
+    },
+    {
+      "name": "Boss Login",
+      "endpoint": "auth/login",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "data": {
+        "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiNDUwYzVlYWMtMzNlYS00MGRmLTlmMzItNDc1ZDVmNjE4MDA1IiwidXNlcm5hbWUiOiJib3NzIiwicm9sZSI6ImJvc3MiLCJleHAiOjE3NzQxMDMyMjN9.1_JfKOL0E_6fuK7m_e5S38u2HpkApb5XAJfmkY9_nT0",
+        "token_type": "bearer",
+        "user": {
+          "id": "450c5eac-33ea-40df-9f32-475d5f618005",
+          "username": "boss",
+          "role": "boss",
+          "created_at": "2026-03-20T14:24:29.966004+00:00"
+        }
+      }
+    },
+    {
+      "name": "Customer Service Login",
+      "endpoint": "auth/login",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "data": {
+        "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiY2I1YmExNWItYjA2MS00MDQ5LTlmNTktYjE0OTZmN2ZiMzM5IiwidXNlcm5hbWUiOiJzZXJ2aWNlMSIsInJvbGUiOiJjdXN0b21lcl9zZXJ2aWNlIiwiZXhwIjoxNzc0MTAzMjI0fQ.eGezrxuW8EvOwzLh9y8UfGggYavr-Ox2J6xlQ9J8Pg8",
+        "token_type": "bearer",
+        "user": {
+          "id": "cb5ba15b-b061-4049-9f59-b1496f7fb339",
+          "username": "service1",
+          "role": "customer_service",
+          "created_at": "2026-03-20T14:24:30.192419+00:00"
+        }
+      }
+    },
+    {
+      "name": "Driver Login",
+      "endpoint": "auth/login",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "data": {
+        "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiOGMwYTQzMDEtNmY2Mi00YTZjLWFmZTUtOWE3MzlhOTc3ODZhIiwidXNlcm5hbWUiOiJkcml2ZXIxIiwicm9sZSI6ImRyaXZlciIsImV4cCI6MTc3NDEwMzIyNH0.eIpIk_nlEaMCV3AnkWAjsg7sO-M1Ibkvb_1AFIkzKHc",
+        "token_type": "bearer",
+        "user": {
+          "id": "8c0a4301-6f62-4a6c-afe5-9a739a97786a",
+          "username": "driver1",
+          "role": "driver",
+          "created_at": "2026-03-20T14:24:30.415787+00:00"
+        }
+      }
+    },
+    {
+      "name": "Boss Statistics",
+      "endpoint": "stats/boss",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "data": {
+        "total_order_value": 31.98,
+        "total_staff_payments": 0.0,
+        "net_profit": 0.0,
+        "total_collected": 50.0,
+        "pending_collections": [],
+        "pending_payments": [],
+        "total_orders": 1,
+        "delivered_orders": 0,
+        "pending_orders": 1
+      }
+    },
+    {
+      "name": "Driver Statistics",
+      "endpoint": "stats/driver?date=2026-03-20",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "data": {
+        "payment_method": "per_package",
+        "hourly_rate": 15.0,
+        "per_package_rate": 5.0,
+        "total_sales": 0,
+        "packages_delivered": 0,
+        "hours_logged": null,
+        "earnings": 0.0,
+        "holding": 0.0,
+        "total_paid": 50.0,
+        "pending_to_boss": 0,
+        "today_orders": 0,
+        "today_delivered": 0,
+        "today_pending": 0,
+        "today_revenue": 0
+      }
+    },
+    {
+      "name": "Boss Inventory Access",
+      "endpoint": "inventory",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "data": [
+        {
+          "id": "66f89297-07c5-4521-8f22-455c61d8817b",
+          "name": "Premium Pizza",
+          "price": 15.99,
+          "stock": 48,
+          "bogo_enabled": true,
+          "created_at": "2026-03-20T14:24:30.649425+00:00",
+          "updated_at": "2026-03-20T14:24:30.649437+00:00"
+        },
+        {
+          "id": "05091d07-1062-4c79-9472-ad6963bdd22b",
+          "name": "Classic Burger",
+          "price": 9.99,
+          "stock": 100,
+          "bogo_enabled": false,
+          "created_at": "2026-03-20T14:24:30.651261+00:00",
+          "updated_at": "2026-03-20T14:24:30.651264+00:00"
+        },
+        {
+          "id": "67867aff-d49b-4841-9793-fbff42d87a04",
+          "name": "Caesar Salad",
+          "price": 7.99,
+          "stock": 30,
+          "bogo_enabled": false,
+          "created_at": "2026-03-20T14:24:30.651277+00:00",
+          "updated_at": "2026-03-20T14:24:30.651279+00:00"
+        },
+        {
+          "id": "1d52e1eb-10a1-43b9-b5fc-64538fed5f36",
+          "name": "Chicken Wings",
+          "price": 12.99,
+          "stock": 45,
+          "bogo_enabled": true,
+          "created_at": "2026-03-20T14:24:30.651289+00:00",
+          "updated_at": "2026-03-20T14:24:30.651291+00:00"
+        },
+        {
+          "id": "c5194eec-eb35-4197-85d9-046871341eef",
+          "name": "Pasta Carbonara",
+          "price": 14.99,
+          "stock": 25,
+          "bogo_enabled": false,
+          "created_at": "2026-03-20T14:24:30.651299+00:00",
+          "updated_at": "2026-03-20T14:24:30.651300+00:00"
+        },
+        {
+          "id": "4b5236bb-6df1-4a7c-ab4c-9e4a35808618",
+          "name": "Fish & Chips",
+          "price": 11.99,
+          "stock": 40,
+          "bogo_enabled": false,
+          "created_at": "2026-03-20T14:24:30.651308+00:00",
+          "updated_at": "2026-03-20T14:24:30.651309+00:00"
+        },
+        {
+          "id": "03600433-bbc4-4909-ac27-e7b3d0182673",
+          "name": "Grilled Steak",
+          "price": 24.99,
+          "stock": 20,
+          "bogo_enabled": false,
+          "created_at": "2026-03-20T14:24:30.651320+00:00",
+          "updated_at": "2026-03-20T14:24:30.651322+00:00"
+        },
+        {
+          "id": "a52b7e27-dd78-4b07-9089-ca71e7a4303c",
+          "name": "Veggie Wrap",
+          "price": 8.99,
+          "stock": 35,
+          "bogo_enabled": false,
+          "created_at": "2026-03-20T14:24:30.651329+00:00",
+          "updated_at": "2026-03-20T14:24:30.651332+00:00"
+        }
+      ]
+    },
+    {
+      "name": "Service Inventory Access",
+      "endpoint": "inventory",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "data": [
+        {
+          "id": "66f89297-07c5-4521-8f22-455c61d8817b",
+          "name": "Premium Pizza",
+          "price": 15.99,
+          "stock": 48,
+          "bogo_enabled": true,
+          "created_at": "2026-03-20T14:24:30.649425+00:00",
+          "updated_at": "2026-03-20T14:24:30.649437+00:00"
+        },
+        {
+          "id": "05091d07-1062-4c79-9472-ad6963bdd22b",
+          "name": "Classic Burger",
+          "price": 9.99,
+          "stock": 100,
+          "bogo_enabled": false,
+          "created_at": "2026-03-20T14:24:30.651261+00:00",
+          "updated_at": "2026-03-20T14:24:30.651264+00:00"
+        },
+        {
+          "id": "67867aff-d49b-4841-9793-fbff42d87a04",
+          "name": "Caesar Salad",
+          "price": 7.99,
+          "stock": 30,
+          "bogo_enabled": false,
+          "created_at": "2026-03-20T14:24:30.651277+00:00",
+          "updated_at": "2026-03-20T14:24:30.651279+00:00"
+        },
+        {
+          "id": "1d52e1eb-10a1-43b9-b5fc-64538fed5f36",
+          "name": "Chicken Wings",
+          "price": 12.99,
+          "stock": 45,
+          "bogo_enabled": true,
+          "created_at": "2026-03-20T14:24:30.651289+00:00",
+          "updated_at": "2026-03-20T14:24:30.651291+00:00"
+        },
+        {
+          "id": "c5194eec-eb35-4197-85d9-046871341eef",
+          "name": "Pasta Carbonara",
+          "price": 14.99,
+          "stock": 25,
+          "bogo_enabled": false,
+          "created_at": "2026-03-20T14:24:30.651299+00:00",
+          "updated_at": "2026-03-20T14:24:30.651300+00:00"
+        },
+        {
+          "id": "4b5236bb-6df1-4a7c-ab4c-9e4a35808618",
+          "name": "Fish & Chips",
+          "price": 11.99,
+          "stock": 40,
+          "bogo_enabled": false,
+          "created_at": "2026-03-20T14:24:30.651308+00:00",
+          "updated_at": "2026-03-20T14:24:30.651309+00:00"
+        },
+        {
+          "id": "03600433-bbc4-4909-ac27-e7b3d0182673",
+          "name": "Grilled Steak",
+          "price": 24.99,
+          "stock": 20,
+          "bogo_enabled": false,
+          "created_at": "2026-03-20T14:24:30.651320+00:00",
+          "updated_at": "2026-03-20T14:24:30.651322+00:00"
+        },
+        {
+          "id": "a52b7e27-dd78-4b07-9089-ca71e7a4303c",
+          "name": "Veggie Wrap",
+          "price": 8.99,
+          "stock": 35,
+          "bogo_enabled": false,
+          "created_at": "2026-03-20T14:24:30.651329+00:00",
+          "updated_at": "2026-03-20T14:24:30.651332+00:00"
+        }
+      ]
+    },
+    {
+      "name": "Driver Inventory Access",
+      "endpoint": "inventory",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "data": [
+        {
+          "id": "66f89297-07c5-4521-8f22-455c61d8817b",
+          "name": "Premium Pizza",
+          "price": 15.99,
+          "stock": 48,
+          "bogo_enabled": true,
+          "created_at": "2026-03-20T14:24:30.649425+00:00",
+          "updated_at": "2026-03-20T14:24:30.649437+00:00"
+        },
+        {
+          "id": "05091d07-1062-4c79-9472-ad6963bdd22b",
+          "name": "Classic Burger",
+          "price": 9.99,
+          "stock": 100,
+          "bogo_enabled": false,
+          "created_at": "2026-03-20T14:24:30.651261+00:00",
+          "updated_at": "2026-03-20T14:24:30.651264+00:00"
+        },
+        {
+          "id": "67867aff-d49b-4841-9793-fbff42d87a04",
+          "name": "Caesar Salad",
+          "price": 7.99,
+          "stock": 30,
+          "bogo_enabled": false,
+          "created_at": "2026-03-20T14:24:30.651277+00:00",
+          "updated_at": "2026-03-20T14:24:30.651279+00:00"
+        },
+        {
+          "id": "1d52e1eb-10a1-43b9-b5fc-64538fed5f36",
+          "name": "Chicken Wings",
+          "price": 12.99,
+          "stock": 45,
+          "bogo_enabled": true,
+          "created_at": "2026-03-20T14:24:30.651289+00:00",
+          "updated_at": "2026-03-20T14:24:30.651291+00:00"
+        },
+        {
+          "id": "c5194eec-eb35-4197-85d9-046871341eef",
+          "name": "Pasta Carbonara",
+          "price": 14.99,
+          "stock": 25,
+          "bogo_enabled": false,
+          "created_at": "2026-03-20T14:24:30.651299+00:00",
+          "updated_at": "2026-03-20T14:24:30.651300+00:00"
+        },
+        {
+          "id": "4b5236bb-6df1-4a7c-ab4c-9e4a35808618",
+          "name": "Fish & Chips",
+          "price": 11.99,
+          "stock": 40,
+          "bogo_enabled": false,
+          "created_at": "2026-03-20T14:24:30.651308+00:00",
+          "updated_at": "2026-03-20T14:24:30.651309+00:00"
+        },
+        {
+          "id": "03600433-bbc4-4909-ac27-e7b3d0182673",
+          "name": "Grilled Steak",
+          "price": 24.99,
+          "stock": 20,
+          "bogo_enabled": false,
+          "created_at": "2026-03-20T14:24:30.651320+00:00",
+          "updated_at": "2026-03-20T14:24:30.651322+00:00"
+        },
+        {
+          "id": "a52b7e27-dd78-4b07-9089-ca71e7a4303c",
+          "name": "Veggie Wrap",
+          "price": 8.99,
+          "stock": 35,
+          "bogo_enabled": false,
+          "created_at": "2026-03-20T14:24:30.651329+00:00",
+          "updated_at": "2026-03-20T14:24:30.651332+00:00"
+        }
+      ]
+    },
+    {
+      "name": "Boss Orders Access",
+      "endpoint": "orders",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "data": [
+        {
+          "id": "d13b23fb-5a6b-4e88-8eff-40235fd5c01a",
+          "address": "123 Test Street, Test City",
+          "items": [
+            {
+              "item_id": "66f89297-07c5-4521-8f22-455c61d8817b",
+              "name": "Premium Pizza",
+              "price": 15.99,
+              "quantity": 2,
+              "is_free_gift": false
+            },
+            {
+              "item_id": "66f89297-07c5-4521-8f22-455c61d8817b",
+              "name": "Premium Pizza",
+              "price": 0.0,
+              "quantity": 2,
+              "is_free_gift": true
+            }
+          ],
+          "total": 31.98,
+          "status": "pending",
+          "driver_id": null,
+          "driver_name": null,
+          "created_by": "cb5ba15b-b061-4049-9f59-b1496f7fb339",
+          "created_by_name": "service1",
+          "created_at": "2026-03-20T14:26:45.702310+00:00",
+          "updated_at": "2026-03-20T14:26:45.702319+00:00",
+          "delivered_at": null
+        }
+      ]
+    },
+    {
+      "name": "Service Orders Access",
+      "endpoint": "orders",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "data": [
+        {
+          "id": "d13b23fb-5a6b-4e88-8eff-40235fd5c01a",
+          "address": "123 Test Street, Test City",
+          "items": [
+            {
+              "item_id": "66f89297-07c5-4521-8f22-455c61d8817b",
+              "name": "Premium Pizza",
+              "price": 15.99,
+              "quantity": 2,
+              "is_free_gift": false
+            },
+            {
+              "item_id": "66f89297-07c5-4521-8f22-455c61d8817b",
+              "name": "Premium Pizza",
+              "price": 0.0,
+              "quantity": 2,
+              "is_free_gift": true
+            }
+          ],
+          "total": 31.98,
+          "status": "pending",
+          "driver_id": null,
+          "driver_name": null,
+          "created_by": "cb5ba15b-b061-4049-9f59-b1496f7fb339",
+          "created_by_name": "service1",
+          "created_at": "2026-03-20T14:26:45.702310+00:00",
+          "updated_at": "2026-03-20T14:26:45.702319+00:00",
+          "delivered_at": null
+        }
+      ]
+    },
+    {
+      "name": "Driver Orders Access",
+      "endpoint": "orders",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "data": []
+    },
+    {
+      "name": "Boss Settings Access",
+      "endpoint": "settings",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "data": {
+        "id": "global_settings",
+        "payment_method": "per_package",
+        "hourly_rate": 15.0,
+        "per_package_rate": 5.0,
+        "updated_at": "2026-03-20T14:26:45.246866+00:00",
+        "updated_by": "boss"
+      }
+    },
+    {
+      "name": "Service Settings Access",
+      "endpoint": "settings",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "data": {
+        "id": "global_settings",
+        "payment_method": "per_package",
+        "hourly_rate": 15.0,
+        "per_package_rate": 5.0,
+        "updated_at": "2026-03-20T14:26:45.246866+00:00",
+        "updated_by": "boss"
+      }
+    },
+    {
+      "name": "Driver Settings Access",
+      "endpoint": "settings",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "data": {
+        "id": "global_settings",
+        "payment_method": "per_package",
+        "hourly_rate": 15.0,
+        "per_package_rate": 5.0,
+        "updated_at": "2026-03-20T14:26:45.246866+00:00",
+        "updated_by": "boss"
+      }
+    },
+    {
+      "name": "Boss Settings Update",
+      "endpoint": "settings",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "data": {
+        "id": "global_settings",
+        "payment_method": "per_package",
+        "hourly_rate": 15.0,
+        "per_package_rate": 5.0,
+        "updated_at": "2026-03-20T14:27:05.786590+00:00",
+        "updated_by": "boss"
+      }
+    },
+    {
+      "name": "Boss Audit Logs",
+      "endpoint": "audit-logs",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "data": []
+    },
+    {
+      "name": "Service Audit Logs (Should Fail)",
+      "endpoint": "audit-logs",
+      "expected_status": 403,
+      "actual_status": 403,
+      "success": true,
+      "data": {
+        "detail": "Insufficient permissions"
+      }
+    },
+    {
+      "name": "Get Inventory for BOGO Test",
+      "endpoint": "inventory",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "data": [
+        {
+          "id": "66f89297-07c5-4521-8f22-455c61d8817b",
+          "name": "Premium Pizza",
+          "price": 15.99,
+          "stock": 48,
+          "bogo_enabled": true,
+          "created_at": "2026-03-20T14:24:30.649425+00:00",
+          "updated_at": "2026-03-20T14:24:30.649437+00:00"
+        },
+        {
+          "id": "05091d07-1062-4c79-9472-ad6963bdd22b",
+          "name": "Classic Burger",
+          "price": 9.99,
+          "stock": 100,
+          "bogo_enabled": false,
+          "created_at": "2026-03-20T14:24:30.651261+00:00",
+          "updated_at": "2026-03-20T14:24:30.651264+00:00"
+        },
+        {
+          "id": "67867aff-d49b-4841-9793-fbff42d87a04",
+          "name": "Caesar Salad",
+          "price": 7.99,
+          "stock": 30,
+          "bogo_enabled": false,
+          "created_at": "2026-03-20T14:24:30.651277+00:00",
+          "updated_at": "2026-03-20T14:24:30.651279+00:00"
+        },
+        {
+          "id": "1d52e1eb-10a1-43b9-b5fc-64538fed5f36",
+          "name": "Chicken Wings",
+          "price": 12.99,
+          "stock": 45,
+          "bogo_enabled": true,
+          "created_at": "2026-03-20T14:24:30.651289+00:00",
+          "updated_at": "2026-03-20T14:24:30.651291+00:00"
+        },
+        {
+          "id": "c5194eec-eb35-4197-85d9-046871341eef",
+          "name": "Pasta Carbonara",
+          "price": 14.99,
+          "stock": 25,
+          "bogo_enabled": false,
+          "created_at": "2026-03-20T14:24:30.651299+00:00",
+          "updated_at": "2026-03-20T14:24:30.651300+00:00"
+        },
+        {
+          "id": "4b5236bb-6df1-4a7c-ab4c-9e4a35808618",
+          "name": "Fish & Chips",
+          "price": 11.99,
+          "stock": 40,
+          "bogo_enabled": false,
+          "created_at": "2026-03-20T14:24:30.651308+00:00",
+          "updated_at": "2026-03-20T14:24:30.651309+00:00"
+        },
+        {
+          "id": "03600433-bbc4-4909-ac27-e7b3d0182673",
+          "name": "Grilled Steak",
+          "price": 24.99,
+          "stock": 20,
+          "bogo_enabled": false,
+          "created_at": "2026-03-20T14:24:30.651320+00:00",
+          "updated_at": "2026-03-20T14:24:30.651322+00:00"
+        },
+        {
+          "id": "a52b7e27-dd78-4b07-9089-ca71e7a4303c",
+          "name": "Veggie Wrap",
+          "price": 8.99,
+          "stock": 35,
+          "bogo_enabled": false,
+          "created_at": "2026-03-20T14:24:30.651329+00:00",
+          "updated_at": "2026-03-20T14:24:30.651332+00:00"
+        }
+      ]
+    },
+    {
+      "name": "Create Order with BOGO",
+      "endpoint": "orders",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "data": {
+        "id": "fa26dc98-89f1-4466-b792-48bc55dbba42",
+        "address": "123 Test Street, Test City",
+        "items": [
+          {
+            "item_id": "66f89297-07c5-4521-8f22-455c61d8817b",
+            "name": "Premium Pizza",
+            "price": 15.99,
+            "quantity": 2,
+            "is_free_gift": false
+          },
+          {
+            "item_id": "66f89297-07c5-4521-8f22-455c61d8817b",
+            "name": "Premium Pizza",
+            "price": 0.0,
+            "quantity": 2,
+            "is_free_gift": true
+          }
+        ],
+        "total": 31.98,
+        "status": "pending",
+        "driver_id": null,
+        "driver_name": null,
+        "created_by": "cb5ba15b-b061-4049-9f59-b1496f7fb339",
+        "created_by_name": "service1",
+        "created_at": "2026-03-20T14:27:06.233483+00:00",
+        "updated_at": "2026-03-20T14:27:06.233494+00:00",
+        "delivered_at": null
+      }
+    },
+    {
+      "name": "Driver Submit Payment",
+      "endpoint": "payments",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "data": {
+        "id": "d5ed1819-fe0c-4dd4-aa83-8324cf0ae4ba",
+        "driver_id": "8c0a4301-6f62-4a6c-afe5-9a739a97786a",
+        "driver_name": "driver1",
+        "amount": 50.0,
+        "status": "pending",
+        "submitted_at": "2026-03-20T14:27:06.336732+00:00",
+        "approved_at": null,
+        "approved_by": null
+      }
+    },
+    {
+      "name": "Boss Approve Payment",
+      "endpoint": "payments/d5ed1819-fe0c-4dd4-aa83-8324cf0ae4ba/approve",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "data": {
+        "id": "d5ed1819-fe0c-4dd4-aa83-8324cf0ae4ba",
+        "driver_id": "8c0a4301-6f62-4a6c-afe5-9a739a97786a",
+        "driver_name": "driver1",
+        "amount": 50.0,
+        "status": "approved",
+        "submitted_at": "2026-03-20T14:27:06.336732+00:00",
+        "approved_at": "2026-03-20T14:27:06.446292+00:00",
+        "approved_by": "boss"
+      }
+    },
+    {
+      "name": "Driver Log Hours",
+      "endpoint": "driver-hours",
+      "expected_status": 200,
+      "actual_status": 200,
+      "success": true,
+      "data": {
+        "id": "f5b1da05-48cd-47b7-8fed-078750edb3a1",
+        "driver_id": "8c0a4301-6f62-4a6c-afe5-9a739a97786a",
+        "date": "2026-03-20",
+        "hours": 8.5,
+        "created_at": "2026-03-20T14:26:46.193956+00:00"
+      }
+    }
+  ],
+  "timestamp": "2026-03-20T14:27:06.563840"
+}
