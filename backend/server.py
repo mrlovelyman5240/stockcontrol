@@ -94,6 +94,7 @@ class Order(BaseModel):
     address: str
     items: List[OrderItem]
     total: float
+    order_type: str = "delivery"  # delivery or pickup
     status: str = "pending"  # pending, completed, cancelled
     driver_id: Optional[str] = None
     driver_name: Optional[str] = None
@@ -107,6 +108,7 @@ class OrderCreate(BaseModel):
     address: str
     items: List[OrderItem]
     total: float
+    order_type: str = "delivery"  # delivery or pickup
     driver_id: str  # Required - must assign driver at creation
     driver_name: str
 
@@ -146,14 +148,16 @@ class Settings(BaseModel):
     id: str = "global_settings"
     payment_method: str = "per_package"  # hourly or per_package
     hourly_rate: float = 15.0
-    per_package_rate: float = 5.0
+    per_delivery_rate: float = 5.0
+    per_pickup_rate: float = 3.0
     updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_by: Optional[str] = None
 
 class SettingsUpdate(BaseModel):
     payment_method: Optional[str] = None
     hourly_rate: Optional[float] = None
-    per_package_rate: Optional[float] = None
+    per_delivery_rate: Optional[float] = None
+    per_pickup_rate: Optional[float] = None
 
 class AuditLog(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -406,6 +410,7 @@ async def create_order(order_data: OrderCreate, user = Depends(require_role(["bo
         address=order_data.address,
         items=[OrderItem(**i.model_dump()) for i in order_data.items],
         total=order_data.total,
+        order_type=order_data.order_type,
         status="pending",  # Order starts as pending, assigned to driver
         driver_id=order_data.driver_id,
         driver_name=order_data.driver_name,
@@ -449,6 +454,37 @@ async def complete_order(order_id: str, user = Depends(require_role(["boss", "cu
             "status": "completed",
             "completed_at": datetime.now(timezone.utc).isoformat(),
             "completed_by": user["username"],
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
+    
+    updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    return Order(**updated)
+
+# Endpoint to cancel an order
+@api_router.put("/orders/{order_id}/cancel", response_model=Order)
+async def cancel_order(order_id: str, user = Depends(require_role(["boss", "customer_service"]))):
+    existing = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    if existing["status"] != "pending":
+        raise HTTPException(status_code=400, detail="Only pending orders can be cancelled")
+    
+    # Restore inventory for cancelled order
+    for item in existing["items"]:
+        if not item.get("is_free_gift", False):
+            await db.inventory.update_one(
+                {"id": item["item_id"]},
+                {"$inc": {"stock": item["quantity"]}}
+            )
+    
+    await db.orders.update_one(
+        {"id": order_id},
+        {"$set": {
+            "status": "cancelled",
+            "cancelled_by": user["username"],
+            "cancelled_at": datetime.now(timezone.utc).isoformat(),
             "updated_at": datetime.now(timezone.utc).isoformat()
         }}
     )
@@ -649,7 +685,11 @@ async def get_boss_stats(user = Depends(require_role(["boss"]))):
     total_staff_payments = 0.0
     
     if settings["payment_method"] == "per_package":
-        total_staff_payments = len(completed_orders) * settings["per_package_rate"]
+        delivery_rate = settings.get("per_delivery_rate", settings.get("per_package_rate", 5.0))
+        pickup_rate = settings.get("per_pickup_rate", settings.get("per_package_rate", 3.0))
+        delivery_count = len([o for o in completed_orders if o.get("order_type", "delivery") == "delivery"])
+        pickup_count = len([o for o in completed_orders if o.get("order_type", "delivery") == "pickup"])
+        total_staff_payments = (delivery_count * delivery_rate) + (pickup_count * pickup_rate)
     else:
         hours = await db.driver_hours.find({}, {"_id": 0}).to_list(10000)
         total_hours = sum(h["hours"] for h in hours)
@@ -672,7 +712,11 @@ async def get_boss_stats(user = Depends(require_role(["boss"]))):
         
         # Calculate driver's earnings from completed orders
         if settings["payment_method"] == "per_package":
-            driver_earnings = len(driver_completed) * settings["per_package_rate"]
+            delivery_rate = settings.get("per_delivery_rate", settings.get("per_package_rate", 5.0))
+            pickup_rate = settings.get("per_pickup_rate", settings.get("per_package_rate", 3.0))
+            d_deliveries = len([o for o in driver_completed if o.get("order_type", "delivery") == "delivery"])
+            d_pickups = len([o for o in driver_completed if o.get("order_type", "delivery") == "pickup"])
+            driver_earnings = (d_deliveries * delivery_rate) + (d_pickups * pickup_rate)
         else:
             driver_hours = await db.driver_hours.find({"driver_id": driver["id"]}, {"_id": 0}).to_list(1000)
             total_hours = sum(h["hours"] for h in driver_hours)
@@ -741,16 +785,26 @@ async def get_driver_stats(date: Optional[str] = None, user = Depends(require_ro
     
     # Calculate FINALIZED earnings (only from completed orders)
     if settings["payment_method"] == "per_package":
-        earnings = packages_delivered * settings["per_package_rate"]
+        delivery_rate = settings.get("per_delivery_rate", settings.get("per_package_rate", 5.0))
+        pickup_rate = settings.get("per_pickup_rate", settings.get("per_package_rate", 3.0))
+        deliveries_completed = len([o for o in completed_orders if o.get("order_type", "delivery") == "delivery"])
+        pickups_completed = len([o for o in completed_orders if o.get("order_type", "delivery") == "pickup"])
+        earnings = (deliveries_completed * delivery_rate) + (pickups_completed * pickup_rate)
         hours_logged = None
     else:
         hours_records = await db.driver_hours.find({"driver_id": user["user_id"]}, {"_id": 0}).to_list(1000)
         hours_logged = sum(h["hours"] for h in hours_records)
         earnings = hours_logged * settings["hourly_rate"]
+        deliveries_completed = len([o for o in completed_orders if o.get("order_type", "delivery") == "delivery"])
+        pickups_completed = len([o for o in completed_orders if o.get("order_type", "delivery") == "pickup"])
+        delivery_rate = settings.get("per_delivery_rate", 5.0)
+        pickup_rate = settings.get("per_pickup_rate", 3.0)
     
     # Calculate EXPECTED earnings from pending (for display)
     if settings["payment_method"] == "per_package":
-        expected_earnings = len(pending_orders) * settings["per_package_rate"]
+        pending_deliveries = len([o for o in pending_orders if o.get("order_type", "delivery") == "delivery"])
+        pending_pickups = len([o for o in pending_orders if o.get("order_type", "delivery") == "pickup"])
+        expected_earnings = (pending_deliveries * delivery_rate) + (pending_pickups * pickup_rate)
     else:
         expected_earnings = 0  # Can't predict hours
     
@@ -776,7 +830,8 @@ async def get_driver_stats(date: Optional[str] = None, user = Depends(require_ro
     return {
         "payment_method": settings["payment_method"],
         "hourly_rate": settings["hourly_rate"],
-        "per_package_rate": settings["per_package_rate"],
+        "per_delivery_rate": settings.get("per_delivery_rate", settings.get("per_package_rate", 5.0)),
+        "per_pickup_rate": settings.get("per_pickup_rate", settings.get("per_package_rate", 3.0)),
         # Pending (expected, not finalized)
         "pending_revenue": pending_revenue,
         "pending_count": len(pending_orders),
@@ -784,6 +839,8 @@ async def get_driver_stats(date: Optional[str] = None, user = Depends(require_ro
         # Finalized (completed orders)
         "total_sales": total_sales,
         "packages_delivered": packages_delivered,
+        "deliveries_completed": deliveries_completed,
+        "pickups_completed": pickups_completed,
         "hours_logged": hours_logged,
         "earnings": earnings,
         "holding": holding,
@@ -829,8 +886,12 @@ async def seed_data():
     await db.inventory.insert_many(inventory)
     
     # Create default settings
-    settings = Settings().model_dump()
-    await db.settings.insert_one(settings)
+    settings = Settings()
+    settings_dict = settings.model_dump()
+    # Ensure new rate fields exist
+    settings_dict["per_delivery_rate"] = 5.0
+    settings_dict["per_pickup_rate"] = 3.0
+    await db.settings.insert_one(settings_dict)
     
     return {"message": "Data seeded successfully", "users": [{"username": u["username"], "role": u["role"]} for u in users]}
 

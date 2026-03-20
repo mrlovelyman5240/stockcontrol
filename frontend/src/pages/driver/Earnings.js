@@ -151,7 +151,7 @@ const DriverEarnings = () => {
           <p className="text-sm opacity-80 mt-2">
             {stats?.payment_method === 'hourly' 
               ? `${stats?.hours_logged || 0} hours × ${formatCurrency(stats?.hourly_rate || 0)}/hr`
-              : `${stats?.packages_delivered || 0} packages × ${formatCurrency(stats?.per_package_rate || 0)}/pkg`
+              : `${stats?.deliveries_completed || 0} deliveries × ${formatCurrency(stats?.per_delivery_rate || 0)} + ${stats?.pickups_completed || 0} pickups × ${formatCurrency(stats?.per_pickup_rate || 0)}`
             }
           </p>
         </CardContent>

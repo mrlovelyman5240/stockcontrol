@@ -3,8 +3,6 @@ import { Card, CardContent } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
-import { Badge } from '../../components/ui/badge';
-import { Switch } from '../../components/ui/switch';
 import { ScrollArea } from '../../components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../../components/ui/dialog';
 import { inventoryApi } from '../../lib/api';
@@ -17,7 +15,6 @@ import {
   Trash2, 
   Search,
   Loader2,
-  Gift,
   AlertTriangle
 } from 'lucide-react';
 
@@ -30,8 +27,7 @@ const ServiceInventory = () => {
   const [formData, setFormData] = useState({
     name: '',
     price: '',
-    stock: '',
-    bogo_enabled: false
+    stock: ''
   });
   const [saving, setSaving] = useState(false);
 
@@ -56,16 +52,14 @@ const ServiceInventory = () => {
       setFormData({
         name: item.name,
         price: item.price.toString(),
-        stock: item.stock.toString(),
-        bogo_enabled: item.bogo_enabled
+        stock: item.stock.toString()
       });
     } else {
       setEditItem(null);
       setFormData({
         name: '',
         price: '',
-        stock: '',
-        bogo_enabled: false
+        stock: ''
       });
     }
     setIsDialogOpen(true);
@@ -82,8 +76,7 @@ const ServiceInventory = () => {
       const data = {
         name: formData.name,
         price: parseFloat(formData.price),
-        stock: parseInt(formData.stock),
-        bogo_enabled: formData.bogo_enabled
+        stock: parseInt(formData.stock)
       };
 
       if (editItem) {
@@ -189,20 +182,6 @@ const ServiceInventory = () => {
                   />
                 </div>
               </div>
-              <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
-                <div className="flex items-center gap-2">
-                  <Gift className="h-5 w-5 text-primary" />
-                  <div>
-                    <p className="font-medium">Buy 1 Get 1 Free</p>
-                    <p className="text-sm text-muted-foreground">Enable BOGO promotion</p>
-                  </div>
-                </div>
-                <Switch
-                  checked={formData.bogo_enabled}
-                  onCheckedChange={(checked) => setFormData({ ...formData, bogo_enabled: checked })}
-                  data-testid="bogo-switch"
-                />
-              </div>
               <Button 
                 className="w-full" 
                 onClick={handleSave} 
@@ -245,12 +224,6 @@ const ServiceInventory = () => {
                     <div className="flex-1">
                       <div className="flex items-center gap-2 mb-1">
                         <h3 className="font-semibold">{item.name}</h3>
-                        {item.bogo_enabled && (
-                          <Badge className="bg-primary/10 text-primary">
-                            <Gift className="h-3 w-3 mr-1" />
-                            BOGO
-                          </Badge>
-                        )}
                       </div>
                       <div className="flex items-center gap-4 text-sm">
                         <span className="font-medium">{formatCurrency(item.price)}</span>
@@ -260,23 +233,24 @@ const ServiceInventory = () => {
                         </span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1">
                       <Button
-                        variant="ghost"
-                        size="icon"
+                        variant="outline"
+                        size="sm"
                         onClick={() => openDialog(item)}
                         data-testid={`edit-item-${item.id}`}
                       >
-                        <Pencil className="h-4 w-4" />
+                        <Pencil className="h-4 w-4 mr-1" />
+                        Edit
                       </Button>
                       <Button
-                        variant="ghost"
-                        size="icon"
+                        variant="destructive"
+                        size="sm"
                         onClick={() => handleDelete(item)}
-                        className="text-destructive hover:text-destructive"
                         data-testid={`delete-item-${item.id}`}
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="h-4 w-4 mr-1" />
+                        Delete
                       </Button>
                     </div>
                   </div>

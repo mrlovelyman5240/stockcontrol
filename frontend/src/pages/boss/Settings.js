@@ -49,7 +49,8 @@ const BossSettings = () => {
       await settingsApi.update({
         payment_method: settings.payment_method,
         hourly_rate: settings.hourly_rate,
-        per_package_rate: settings.per_package_rate,
+        per_delivery_rate: settings.per_delivery_rate,
+        per_pickup_rate: settings.per_pickup_rate,
       });
       toast.success('Settings saved successfully');
     } catch (error) {
@@ -291,34 +292,65 @@ const BossSettings = () => {
             </div>
           </div>
 
-          {/* Per Package Rate */}
+          {/* Per Delivery Rate */}
           <div className={`p-4 rounded-xl border-2 transition-colors ${
             settings?.payment_method === 'per_package' 
-              ? 'border-primary bg-primary/5' 
+              ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-900/10' 
               : 'border-border'
           }`}>
             <div className="flex items-center gap-2 mb-3">
-              <Package className="h-5 w-5 text-muted-foreground" />
-              <Label htmlFor="package-rate" className="text-base font-medium">
-                Per Package Rate
+              <Truck className="h-5 w-5 text-blue-600" />
+              <Label htmlFor="delivery-rate" className="text-base font-medium">
+                Per Delivery Rate
               </Label>
               {settings?.payment_method === 'per_package' && (
-                <span className="text-xs bg-primary text-white px-2 py-0.5 rounded-full">Active</span>
+                <span className="text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full">Active</span>
               )}
             </div>
             <div className="flex items-center gap-2">
               <DollarSign className="h-5 w-5 text-muted-foreground" />
               <Input
-                id="package-rate"
+                id="delivery-rate"
                 type="number"
                 step="0.01"
                 min="0"
-                value={settings?.per_package_rate || 0}
-                onChange={(e) => setSettings({ ...settings, per_package_rate: parseFloat(e.target.value) || 0 })}
+                value={settings?.per_delivery_rate || 0}
+                onChange={(e) => setSettings({ ...settings, per_delivery_rate: parseFloat(e.target.value) || 0 })}
                 className="text-2xl font-bold h-14"
-                data-testid="package-rate-input"
+                data-testid="delivery-rate-input"
               />
-              <span className="text-muted-foreground">/delivery</span>
+              <span className="text-muted-foreground whitespace-nowrap">/delivery</span>
+            </div>
+          </div>
+
+          {/* Per Pickup Rate */}
+          <div className={`p-4 rounded-xl border-2 transition-colors ${
+            settings?.payment_method === 'per_package' 
+              ? 'border-violet-500 bg-violet-50/50 dark:bg-violet-900/10' 
+              : 'border-border'
+          }`}>
+            <div className="flex items-center gap-2 mb-3">
+              <Package className="h-5 w-5 text-violet-600" />
+              <Label htmlFor="pickup-rate" className="text-base font-medium">
+                Per Pickup Rate
+              </Label>
+              {settings?.payment_method === 'per_package' && (
+                <span className="text-xs bg-violet-600 text-white px-2 py-0.5 rounded-full">Active</span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <DollarSign className="h-5 w-5 text-muted-foreground" />
+              <Input
+                id="pickup-rate"
+                type="number"
+                step="0.01"
+                min="0"
+                value={settings?.per_pickup_rate || 0}
+                onChange={(e) => setSettings({ ...settings, per_pickup_rate: parseFloat(e.target.value) || 0 })}
+                className="text-2xl font-bold h-14"
+                data-testid="pickup-rate-input"
+              />
+              <span className="text-muted-foreground whitespace-nowrap">/pickup</span>
             </div>
           </div>
         </CardContent>

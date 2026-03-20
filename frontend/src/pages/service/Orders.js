@@ -6,7 +6,7 @@ import { Badge } from '../../components/ui/badge';
 import { ScrollArea } from '../../components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { ordersApi } from '../../lib/api';
-import { formatCurrency, formatDateTime, getStatusColor, getStatusLabel, getOrderBorderColor, getApiErrorMessage } from '../../lib/utils';
+import { formatCurrency, formatDateTime, getStatusColor, getStatusLabel, getOrderBorderColor, getOrderTypeBadge, getApiErrorMessage } from '../../lib/utils';
 import { toast } from 'sonner';
 import { 
   ClipboardList, 
@@ -16,7 +16,9 @@ import {
   Loader2,
   RefreshCw,
   Truck,
-  CheckCircle
+  CheckCircle,
+  XCircle,
+  ShoppingBag
 } from 'lucide-react';
 
 const ServiceOrders = () => {
@@ -49,6 +51,19 @@ const ServiceOrders = () => {
       fetchOrders();
     } catch (error) {
       toast.error(getApiErrorMessage(error, 'Failed to complete order'));
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleCancel = async (orderId) => {
+    setActionLoading(orderId + '-cancel');
+    try {
+      await ordersApi.cancel(orderId);
+      toast.success('Order cancelled. Inventory restored.');
+      fetchOrders();
+    } catch (error) {
+      toast.error(getApiErrorMessage(error, 'Failed to cancel order'));
     } finally {
       setActionLoading(null);
     }
@@ -120,6 +135,7 @@ const ServiceOrders = () => {
             <SelectItem value="all">All</SelectItem>
             <SelectItem value="pending">Pending</SelectItem>
             <SelectItem value="completed">Completed</SelectItem>
+            <SelectItem value="cancelled">Cancelled</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -142,9 +158,13 @@ const ServiceOrders = () => {
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between mb-3">
                     <div>
-                      <div className="flex items-center gap-2 mb-1">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <Badge className={getStatusColor(order.status)}>
                           {getStatusLabel(order.status)}
+                        </Badge>
+                        <Badge className={getOrderTypeBadge(order.order_type).className}>
+                          {order.order_type === 'pickup' ? <ShoppingBag className="h-3 w-3 mr-1" /> : <Truck className="h-3 w-3 mr-1" />}
+                          {getOrderTypeBadge(order.order_type).label}
                         </Badge>
                         <span className="text-xs text-muted-foreground">
                           #{order.id.slice(0, 8)}
@@ -176,29 +196,54 @@ const ServiceOrders = () => {
                       <span>Driver: <strong>{order.driver_name}</strong></span>
                     </div>
                     
-                    {/* Mark as Done button for pending orders */}
+                    {/* Mark as Done and Cancel buttons for pending orders */}
                     {order.status === 'pending' && (
-                      <Button
-                        size="sm"
-                        onClick={() => handleMarkDone(order.id)}
-                        disabled={actionLoading === order.id}
-                        data-testid={`complete-order-${order.id}`}
-                      >
-                        {actionLoading === order.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <>
-                            <CheckCircle className="h-4 w-4 mr-1" />
-                            Mark Done
-                          </>
-                        )}
-                      </Button>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => handleCancel(order.id)}
+                          disabled={actionLoading === order.id + '-cancel'}
+                          data-testid={`cancel-order-${order.id}`}
+                        >
+                          {actionLoading === order.id + '-cancel' ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <>
+                              <XCircle className="h-4 w-4 mr-1" />
+                              Cancel
+                            </>
+                          )}
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={() => handleMarkDone(order.id)}
+                          disabled={actionLoading === order.id}
+                          data-testid={`complete-order-${order.id}`}
+                        >
+                          {actionLoading === order.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <>
+                              <CheckCircle className="h-4 w-4 mr-1" />
+                              Mark Done
+                            </>
+                          )}
+                        </Button>
+                      </div>
                     )}
 
                     {order.status === 'completed' && (
                       <div className="flex items-center gap-1 text-primary text-sm">
                         <CheckCircle className="h-4 w-4" />
                         <span>Done</span>
+                      </div>
+                    )}
+
+                    {order.status === 'cancelled' && (
+                      <div className="flex items-center gap-1 text-destructive text-sm">
+                        <XCircle className="h-4 w-4" />
+                        <span>Cancelled</span>
                       </div>
                     )}
                   </div>

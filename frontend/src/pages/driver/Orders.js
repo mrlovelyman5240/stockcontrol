@@ -5,7 +5,7 @@ import { Badge } from '../../components/ui/badge';
 import { ScrollArea } from '../../components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { ordersApi } from '../../lib/api';
-import { formatCurrency, formatDateTime, getStatusColor, getStatusLabel, getOrderBorderColor } from '../../lib/utils';
+import { formatCurrency, formatDateTime, getStatusColor, getStatusLabel, getOrderBorderColor, getOrderTypeBadge } from '../../lib/utils';
 import { toast } from 'sonner';
 import { 
   ClipboardList, 
@@ -14,7 +14,10 @@ import {
   Loader2,
   RefreshCw,
   CheckCircle,
-  Clock
+  Clock,
+  Truck,
+  ShoppingBag,
+  XCircle
 } from 'lucide-react';
 
 const DriverOrders = () => {
@@ -89,6 +92,7 @@ const DriverOrders = () => {
           <SelectItem value="all">All Orders</SelectItem>
           <SelectItem value="pending">Pending (To Deliver)</SelectItem>
           <SelectItem value="completed">Completed</SelectItem>
+          <SelectItem value="cancelled">Cancelled</SelectItem>
         </SelectContent>
       </Select>
 
@@ -110,9 +114,13 @@ const DriverOrders = () => {
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between mb-3">
                     <div>
-                      <div className="flex items-center gap-2 mb-1">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <Badge className={getStatusColor(order.status)}>
                           {getStatusLabel(order.status)}
+                        </Badge>
+                        <Badge className={getOrderTypeBadge(order.order_type).className}>
+                          {order.order_type === 'pickup' ? <ShoppingBag className="h-3 w-3 mr-1" /> : <Truck className="h-3 w-3 mr-1" />}
+                          {getOrderTypeBadge(order.order_type).label}
                         </Badge>
                         <span className="text-xs text-muted-foreground">
                           #{order.id.slice(0, 8)}
@@ -151,6 +159,13 @@ const DriverOrders = () => {
                     <div className="flex items-center justify-center gap-2 text-primary py-2">
                       <CheckCircle className="h-5 w-5" />
                       <span className="font-medium">Completed</span>
+                    </div>
+                  )}
+
+                  {order.status === 'cancelled' && (
+                    <div className="flex items-center justify-center gap-2 text-destructive py-2 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                      <XCircle className="h-5 w-5" />
+                      <span className="font-medium">Cancelled</span>
                     </div>
                   )}
 

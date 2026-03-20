@@ -54,6 +54,7 @@ export const ordersApi = {
   create: (data) => api.post('/orders', data),
   update: (id, data) => api.put(`/orders/${id}`, data),
   complete: (id) => api.put(`/orders/${id}/complete`),
+  cancel: (id) => api.put(`/orders/${id}/cancel`),
   delete: (id) => api.delete(`/orders/${id}`),
 };
 

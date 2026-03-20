@@ -6,7 +6,7 @@ import { Badge } from '../../components/ui/badge';
 import { ScrollArea } from '../../components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { ordersApi, usersApi } from '../../lib/api';
-import { formatCurrency, formatDateTime, getStatusColor, getStatusLabel, getOrderBorderColor } from '../../lib/utils';
+import { formatCurrency, formatDateTime, getStatusColor, getStatusLabel, getOrderBorderColor, getOrderTypeBadge } from '../../lib/utils';
 import { toast } from 'sonner';
 import { 
   ClipboardList, 
@@ -16,7 +16,8 @@ import {
   Loader2,
   RefreshCw,
   Truck,
-  CheckCircle
+  CheckCircle,
+  ShoppingBag
 } from 'lucide-react';
 
 const BossOrders = () => {
@@ -107,9 +108,7 @@ const BossOrders = () => {
           <SelectContent>
             <SelectItem value="all">All</SelectItem>
             <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="in_transit">In Transit</SelectItem>
-            <SelectItem value="awaiting_boss_approval">Awaiting Approval</SelectItem>
-            <SelectItem value="approved">Approved</SelectItem>
+            <SelectItem value="completed">Completed</SelectItem>
             <SelectItem value="cancelled">Cancelled</SelectItem>
           </SelectContent>
         </Select>
@@ -133,9 +132,13 @@ const BossOrders = () => {
                 <CardContent className="p-4">
                   <div className="flex items-start justify-between mb-3">
                     <div>
-                      <div className="flex items-center gap-2 mb-1">
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
                         <Badge className={getStatusColor(order.status)}>
                           {getStatusLabel(order.status)}
+                        </Badge>
+                        <Badge className={getOrderTypeBadge(order.order_type).className}>
+                          {order.order_type === 'pickup' ? <ShoppingBag className="h-3 w-3 mr-1" /> : <Truck className="h-3 w-3 mr-1" />}
+                          {getOrderTypeBadge(order.order_type).label}
                         </Badge>
                         <span className="text-xs text-muted-foreground">
                           #{order.id.slice(0, 8)}

@@ -41,7 +41,7 @@ export function getStatusColor(status) {
   const colors = {
     pending: 'status-pending',
     completed: 'status-completed',
-    cancelled: 'status-cancelled',
+    cancelled: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
     approved: 'status-approved',
     rejected: 'status-rejected',
   };
@@ -83,4 +83,9 @@ export function getOrderBorderColor(status) {
     cancelled: 'border-l-red-500',
   };
   return colors[status] || 'border-l-muted';
+}
+
+export function getOrderTypeBadge(orderType) {
+  if (orderType === 'pickup') return { label: 'Pickup', className: 'bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-400' };
+  return { label: 'Delivery', className: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' };
 }
