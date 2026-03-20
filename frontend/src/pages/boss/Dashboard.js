@@ -18,11 +18,15 @@ import {
   XCircle,
   Clock,
   Loader2,
-  RefreshCw
+  RefreshCw,
+  Moon,
+  Sun
 } from 'lucide-react';
+import { useTheme } from '../../contexts/ThemeContext';
 
 const BossDashboard = () => {
   const { user } = useAuth();
+  const { resolvedTheme, toggleTheme } = useTheme();
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(null);
@@ -84,9 +88,14 @@ const BossDashboard = () => {
           <h1 className="text-2xl font-bold">Welcome, {user?.username}</h1>
           <p className="text-muted-foreground">Boss Dashboard</p>
         </div>
-        <Button variant="ghost" size="icon" onClick={fetchStats} data-testid="refresh-stats">
-          <RefreshCw className="h-5 w-5" />
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" size="icon" onClick={toggleTheme} data-testid="theme-toggle">
+            {resolvedTheme === 'dark' ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
+          </Button>
+          <Button variant="ghost" size="icon" onClick={fetchStats} data-testid="refresh-stats">
+            <RefreshCw className="h-5 w-5" />
+          </Button>
+        </div>
       </div>
 
       {/* Stats Grid */}

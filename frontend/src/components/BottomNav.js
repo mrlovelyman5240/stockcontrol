@@ -26,6 +26,7 @@ const BottomNav = () => {
           { icon: LayoutDashboard, label: 'Dashboard', path: '/boss' },
           { icon: ClipboardList, label: 'Orders', path: '/boss/orders' },
           { icon: Package, label: 'Inventory', path: '/boss/inventory' },
+          { icon: FileText, label: 'Audit', path: '/boss/audit-log' },
           { icon: Settings, label: 'Settings', path: '/boss/settings' },
         ];
       case 'customer_service':
