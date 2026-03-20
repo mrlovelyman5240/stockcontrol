@@ -4,24 +4,38 @@ import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { Switch } from '../../components/ui/switch';
-import { settingsApi } from '../../lib/api';
-import { formatCurrency } from '../../lib/utils';
+import { Badge } from '../../components/ui/badge';
+import { ScrollArea } from '../../components/ui/scroll-area';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../../components/ui/dialog';
+import { settingsApi, usersApi } from '../../lib/api';
+import { useAuth } from '../../contexts/AuthContext';
+import { formatCurrency, getRoleLabel } from '../../lib/utils';
 import { toast } from 'sonner';
-import { Settings, DollarSign, Clock, Package, Loader2, Save } from 'lucide-react';
+import { Settings, DollarSign, Clock, Package, Loader2, Save, UserPlus, Users, Truck, Headphones } from 'lucide-react';
 
 const BossSettings = () => {
+  const { createUser } = useAuth();
   const [settings, setSettings] = useState(null);
+  const [drivers, setDrivers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
+  const [newUser, setNewUser] = useState({ username: '', password: '', role: '' });
+  const [creatingUser, setCreatingUser] = useState(false);
 
   useEffect(() => {
-    fetchSettings();
+    fetchData();
   }, []);
 
-  const fetchSettings = async () => {
+  const fetchData = async () => {
     try {
-      const response = await settingsApi.get();
-      setSettings(response.data);
+      const [settingsRes, driversRes] = await Promise.all([
+        settingsApi.get(),
+        usersApi.getDrivers()
+      ]);
+      setSettings(settingsRes.data);
+      setDrivers(driversRes.data);
     } catch (error) {
       toast.error('Failed to load settings');
     } finally {
@@ -52,6 +66,30 @@ const BossSettings = () => {
     });
   };
 
+  const handleCreateUser = async () => {
+    if (!newUser.username || !newUser.password || !newUser.role) {
+      toast.error('Please fill in all fields');
+      return;
+    }
+
+    setCreatingUser(true);
+    try {
+      const result = await createUser(newUser.username, newUser.password, newUser.role);
+      if (result.success) {
+        toast.success(`User "${newUser.username}" created successfully`);
+        setNewUser({ username: '', password: '', role: '' });
+        setIsUserDialogOpen(false);
+        fetchData(); // Refresh drivers list
+      } else {
+        toast.error(result.error);
+      }
+    } catch (error) {
+      toast.error('Failed to create user');
+    } finally {
+      setCreatingUser(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -61,7 +99,7 @@ const BossSettings = () => {
   }
 
   return (
-    <div className="p-4 max-w-2xl mx-auto" data-testid="boss-settings">
+    <div className="p-4 max-w-2xl mx-auto pb-24" data-testid="boss-settings">
       {/* Header */}
       <div className="flex items-center gap-3 mb-6">
         <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
@@ -69,9 +107,109 @@ const BossSettings = () => {
         </div>
         <div>
           <h1 className="text-2xl font-bold">Settings</h1>
-          <p className="text-muted-foreground">Configure driver compensation</p>
+          <p className="text-muted-foreground">Manage your business</p>
         </div>
       </div>
+
+      {/* User Management */}
+      <Card className="mb-6" data-testid="user-management-card">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Users className="h-5 w-5" />
+            User Management
+          </CardTitle>
+          <Dialog open={isUserDialogOpen} onOpenChange={setIsUserDialogOpen}>
+            <DialogTrigger asChild>
+              <Button size="sm" data-testid="add-user-btn">
+                <UserPlus className="h-4 w-4 mr-2" />
+                Add User
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Create New User</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 mt-4">
+                <div className="space-y-2">
+                  <Label htmlFor="new-username">Username</Label>
+                  <Input
+                    id="new-username"
+                    value={newUser.username}
+                    onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
+                    placeholder="Enter username"
+                    data-testid="new-user-username"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="new-password">Password</Label>
+                  <Input
+                    id="new-password"
+                    type="password"
+                    value={newUser.password}
+                    onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
+                    placeholder="Enter password"
+                    data-testid="new-user-password"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="new-role">Role</Label>
+                  <Select
+                    value={newUser.role}
+                    onValueChange={(value) => setNewUser({ ...newUser, role: value })}
+                  >
+                    <SelectTrigger data-testid="new-user-role">
+                      <SelectValue placeholder="Select role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="customer_service">
+                        <div className="flex items-center gap-2">
+                          <Headphones className="h-4 w-4" />
+                          Customer Service
+                        </div>
+                      </SelectItem>
+                      <SelectItem value="driver">
+                        <div className="flex items-center gap-2">
+                          <Truck className="h-4 w-4" />
+                          Driver
+                        </div>
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button
+                  className="w-full"
+                  onClick={handleCreateUser}
+                  disabled={creatingUser}
+                  data-testid="create-user-btn"
+                >
+                  {creatingUser ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                  Create User
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground mb-3">Active Drivers ({drivers.length})</p>
+          {drivers.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">No drivers yet</p>
+          ) : (
+            <ScrollArea className="max-h-[150px]">
+              <div className="space-y-2">
+                {drivers.map((driver) => (
+                  <div key={driver.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <Truck className="h-4 w-4 text-muted-foreground" />
+                      <span className="font-medium">{driver.username}</span>
+                    </div>
+                    <Badge variant="outline">Driver</Badge>
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Payment Method Toggle */}
       <Card className="mb-6" data-testid="payment-method-card">

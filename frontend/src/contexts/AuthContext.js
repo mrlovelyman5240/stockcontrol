@@ -10,7 +10,7 @@ export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(localStorage.getItem('token'));
   const [loading, setLoading] = useState(true);
 
-  // Set up axios defaults
+  // Set up axios defaults when token changes
   useEffect(() => {
     if (token) {
       axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
@@ -21,21 +21,29 @@ export const AuthProvider = ({ children }) => {
 
   // Verify token and get user on mount
   const verifyAuth = useCallback(async () => {
-    if (!token) {
+    const storedToken = localStorage.getItem('token');
+    if (!storedToken) {
       setLoading(false);
       return;
     }
 
     try {
+      // Set header before making request
+      axios.defaults.headers.common['Authorization'] = `Bearer ${storedToken}`;
       const response = await axios.get(`${API_URL}/api/auth/me`);
       setUser(response.data);
+      setToken(storedToken);
     } catch (error) {
       console.error('Auth verification failed:', error);
-      logout();
+      // Clear invalid token
+      localStorage.removeItem('token');
+      setToken(null);
+      setUser(null);
+      delete axios.defaults.headers.common['Authorization'];
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, []);
 
   useEffect(() => {
     verifyAuth();
@@ -50,9 +58,13 @@ export const AuthProvider = ({ children }) => {
       
       const { access_token, user: userData } = response.data;
       
+      // Store token and update state
       localStorage.setItem('token', access_token);
+      axios.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
       setToken(access_token);
       setUser(userData);
+      
+      console.log('Login success - User:', userData.username, 'Role:', userData.role);
       
       return { success: true, user: userData };
     } catch (error) {
@@ -61,23 +73,17 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const register = async (username, password, role) => {
+  // Function for Boss to create new users (drivers, customer service)
+  const createUser = async (username, password, role) => {
     try {
       const response = await axios.post(`${API_URL}/api/auth/register`, {
         username,
         password,
         role
       });
-      
-      const { access_token, user: userData } = response.data;
-      
-      localStorage.setItem('token', access_token);
-      setToken(access_token);
-      setUser(userData);
-      
-      return { success: true, user: userData };
+      return { success: true, user: response.data.user };
     } catch (error) {
-      const message = error.response?.data?.detail || 'Registration failed';
+      const message = error.response?.data?.detail || 'Failed to create user';
       return { success: false, error: message };
     }
   };
@@ -94,9 +100,9 @@ export const AuthProvider = ({ children }) => {
     token,
     loading,
     login,
-    register,
+    createUser, // Boss-only function to create users
     logout,
-    isAuthenticated: !!user,
+    isAuthenticated: !!user && !!token,
     isBoss: user?.role === 'boss',
     isCustomerService: user?.role === 'customer_service',
     isDriver: user?.role === 'driver'
