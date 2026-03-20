@@ -1,104 +1,71 @@
-# LogiFlow Pro - Product Requirements Document
+# LogiFlow Pro - Delivery Management App
 
 ## Original Problem Statement
-Build a delivery management system with 3 roles:
-1. **Boss (Patron)**: Full access with dashboard, financial metrics, pending collections, settings for driver compensation, audit log
-2. **Customer Service**: Create orders with live inventory check, BOGO promotion support
-3. **Driver**: Dashboard with today's orders, earnings calculator with date picker, payment submission
+Build a full-stack delivery management app with 3 role-based access levels: Boss, Customer Service, and Driver.
 
-## Architecture
-- **Frontend**: React 19 + Tailwind CSS + Shadcn UI components
-- **Backend**: FastAPI with Python
-- **Database**: MongoDB (persistent storage)
-- **Auth**: JWT-based authentication with role assignment
-- **PWA**: Service worker + manifest for "Add to Home Screen"
+## Tech Stack
+- Frontend: React, Tailwind CSS, shadcn/ui, react-router-dom, Sonner (toasts)
+- Backend: FastAPI, Motor (async MongoDB), PyJWT, Bcrypt
+- Database: MongoDB
+- Architecture: REST API, JWT Auth, Role-based Access Control, PWA-ready
 
-## User Personas
-1. **Boss/Patron**: Business owner who needs full visibility into operations, manages driver compensation settings, approves payments
-2. **Customer Service**: Staff who creates orders, manages inventory, needs quick access to stock levels
-3. **Driver**: Delivery personnel tracking orders, earnings, and payments to boss
+## Roles & Features
 
-## Core Requirements (Static)
-- Role-based authentication (boss, customer_service, driver)
-- Financial dashboard with metrics
-- Order management with status tracking
-- Real-time inventory with BOGO promotions
-- Dynamic driver compensation (hourly vs per-package)
-- Payment submission and approval workflow
-- Audit logging for customer service modifications
-- Mobile-first PWA design
-- Dark/Light theme support
+### Boss
+- Full access dashboard with financial metrics (Pending Revenue, Total Revenue, Net Profit)
+- Pending Collections view per driver
+- Admin Settings: Toggle driver compensation (Hourly vs Per Package rate)
+- Audit Log (hidden, tracks CS modifications)
+- Order management
 
-## What's Been Implemented (March 20, 2026)
+### Customer Service
+- Create orders with live inventory check (prevents out-of-stock)
+- BOGO promotions support
+- Driver assignment (mandatory at order creation)
+- Mark orders as Done (Pending -> Completed, finalizes money)
+- Order management
 
-### Backend (/app/backend/server.py)
-- [x] User authentication (register, login, JWT)
-- [x] Inventory CRUD with BOGO support
-- [x] Order management with status tracking
-- [x] Payment submission and approval
-- [x] Driver hours logging
-- [x] Settings management (payment method, rates)
-- [x] Audit logging for deletions/modifications
-- [x] Boss statistics endpoint
-- [x] Driver statistics endpoint
-- [x] Seed data endpoint
+### Driver
+- Dashboard with earnings stats
+- My Orders tab
+- Dynamic earnings breakdown based on Boss's payment settings
+- Holding calculation (Total Sales - Earnings)
+- Pay Boss submission form
 
-### Frontend Pages
-- [x] Login page with role selection
-- [x] Boss Dashboard with financial metrics
-- [x] Boss Orders management
-- [x] Boss Inventory management
-- [x] Boss Settings (compensation toggle)
-- [x] Boss Audit Log
-- [x] Customer Service Dashboard
-- [x] Customer Service New Order (with BOGO)
-- [x] Customer Service Inventory
-- [x] Customer Service Profile
-- [x] Driver Dashboard
-- [x] Driver Orders
-- [x] Driver Earnings (with date picker)
-- [x] Driver Profile
+## DB Schema
+- users: {id, username, password_hash, role, created_at}
+- inventory: {id, name, price, stock, bogo_enabled, created_at, updated_at}
+- orders: {id, address, items[], total, status, driver_id, driver_name, created_by, created_by_name, created_at, updated_at, completed_at}
+- settings: {id, payment_method, hourly_rate, per_package_rate, updated_at, updated_by}
+- payments: {id, driver_id, driver_name, amount, status, submitted_at, approved_at, approved_by}
+- driver_hours: {id, driver_id, date, hours, created_at}
+- audit_logs: {id, action, entity_type, entity_id, entity_name, performed_by, performed_by_name, details, timestamp}
 
-### Features
-- [x] Bottom navigation (role-based)
-- [x] Theme toggle (dark/light mode)
-- [x] PWA manifest and service worker
-- [x] Real-time inventory deduction on orders
-- [x] BOGO automatic free gift addition
-- [x] Date picker for historical earnings view
-- [x] Hours logging for hourly rate
+## Test Credentials
+- Boss: boss / boss123
+- Customer Service: service1 / service123
+- Driver: driver1 / driver123, driver2 / driver123
 
-## Test Users
-- `boss / boss123` - Full access
-- `service1 / service123` - Customer Service
-- `driver1 / driver123` - Driver
-- `driver2 / driver123` - Driver
+## Completed Features
+- [x] Project scaffolding (FastAPI, React, MongoDB)
+- [x] Role-based Authentication & conditional routing
+- [x] Removed Register tab, added Logout header button
+- [x] Driver compensation settings (Hourly vs Per Package toggle)
+- [x] Pending -> Done financial status workflow
+- [x] All dashboards for 3 roles
+- [x] Inventory management (CRUD + BOGO)
+- [x] Order creation with driver assignment
+- [x] Service worker (network-first strategy)
+- [x] Bug Fix: React crash on 422 error (getApiErrorMessage helper) - Mar 20, 2026
+- [x] Bug Fix: Orders tab visible in CS bottom nav - Mar 20, 2026
+- [x] Bug Fix: Driver dropdown working in New Order - Mar 20, 2026
+- [x] Bug Fix: Safe error handling across AuthContext, Orders, NewOrder - Mar 20, 2026
 
-## Prioritized Backlog
+## Upcoming Tasks (P1)
+- [ ] Driver Payment Submission Workflow ("Pay Boss" form + payment history)
 
-### P0 (Critical) - Done
-- [x] All core features implemented and tested
-
-### P1 (High Priority) - Future
-- [ ] Order search/filter improvements
-- [ ] Bulk order assignment
-- [ ] Export financial reports (CSV/PDF)
-- [ ] Push notifications for new orders
-
-### P2 (Medium Priority) - Future
-- [ ] Customer management (add customer details to orders)
-- [ ] Route optimization for drivers
-- [ ] Real-time order tracking with map
-- [ ] Multi-language support (Turkish/English)
-
-### P3 (Low Priority) - Future
-- [ ] Analytics dashboard with charts
-- [ ] Driver performance metrics
-- [ ] Inventory alerts (low stock notifications)
-- [ ] Order history search
-
-## Next Tasks
-1. Add push notifications for new orders assigned to drivers
-2. Implement order search and advanced filtering
-3. Add export functionality for financial reports
-4. Consider adding map integration for delivery routes
+## Backlog (P2)
+- [ ] Boss Audit Log UI enhancements
+- [ ] PWA polish & offline support
+- [ ] General error handling hardening across remaining API calls
+- [ ] Backend refactoring (split server.py into route modules)

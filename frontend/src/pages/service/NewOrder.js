@@ -352,12 +352,12 @@ const NewOrder = () => {
                     className={`flex items-center justify-between p-2 rounded-lg ${item.is_free_gift ? 'bg-primary/10' : 'bg-muted/50'}`}
                   >
                     <div className="flex-1">
-                      <p className="font-medium text-sm">
+                      <div className="font-medium text-sm">
                         {item.name}
                         {item.is_free_gift && (
                           <Badge className="ml-2 bg-primary text-white text-xs">Free Gift</Badge>
                         )}
-                      </p>
+                      </div>
                       <p className="text-xs text-muted-foreground">
                         {item.is_free_gift ? '$0.00' : formatCurrency(item.price)} × {item.quantity}
                       </p>
