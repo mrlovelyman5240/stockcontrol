@@ -1,0 +1,185 @@
+{
+  "design_system": {
+    "identity": {
+      "name": "LogiFlow Pro",
+      "persona": "E1: The Anti-AI Designer",
+      "core_principles": [
+        "Fusion over Imitation: Finance precision meets delivery speed.",
+        "Emotion First: Trust for Boss, Speed for Drivers, Clarity for Support.",
+        "Content is King: Data is the hero. Big numbers, clear status.",
+        "Mobile First: Touch targets > 44px. Bottom navigation is law."
+      ]
+    },
+    "typography": {
+      "font_family": {
+        "headings": "Manrope, sans-serif",
+        "body": "Inter, sans-serif",
+        "mono": "JetBrains Mono, monospace"
+      },
+      "scale": {
+        "h1": "text-4xl font-bold tracking-tight",
+        "h2": "text-3xl font-semibold tracking-tight",
+        "h3": "text-2xl font-semibold",
+        "body_lg": "text-lg leading-relaxed",
+        "body_base": "text-base leading-normal",
+        "caption": "text-sm text-muted-foreground",
+        "money_large": "text-5xl font-black tracking-tighter tabular-nums",
+        "money_medium": "text-2xl font-bold tracking-tight tabular-nums"
+      },
+      "imports": [
+        "@fontsource/manrope",
+        "@fontsource/inter",
+        "@fontsource/jetbrains-mono"
+      ]
+    },
+    "colors": {
+      "palette": {
+        "primary": {
+          "name": "Emerald Wealth",
+          "default": "#059669",
+          "hover": "#047857",
+          "foreground": "#FFFFFF"
+        },
+        "secondary": {
+          "name": "Slate Command",
+          "default": "#1E293B",
+          "foreground": "#F8FAFC"
+        },
+        "accent": {
+          "name": "Tangerine Action",
+          "default": "#F97316",
+          "foreground": "#FFFFFF"
+        },
+        "background": {
+          "light": "#F8FAFC",
+          "dark": "#020617"
+        },
+        "surface": {
+          "light": "#FFFFFF",
+          "dark": "#0F172A"
+        },
+        "status": {
+          "success": "#10B981",
+          "warning": "#F59E0B",
+          "error": "#EF4444",
+          "info": "#3B82F6"
+        }
+      },
+      "theme_strategy": "System default with toggle. High contrast text always."
+    },
+    "spacing": {
+      "scale": "Tailwind standard extended",
+      "base_padding": "p-6",
+      "card_padding": "p-6",
+      "section_gap": "gap-8",
+      "container_max": "max-w-md mx-auto md:max-w-2xl lg:max-w-5xl"
+    },
+    "visual_enhancers": {
+      "radius": "rounded-xl",
+      "shadows": {
+        "card": "shadow-[0_2px_8px_rgba(0,0,0,0.08)]",
+        "floating": "shadow-[0_8px_30px_rgb(0,0,0,0.12)]"
+      },
+      "borders": "border border-border/50",
+      "glass": "bg-background/80 backdrop-blur-md border-t border-white/10"
+    }
+  },
+  "layout_strategies": {
+    "mobile_nav": {
+      "position": "fixed bottom-0 left-0 right-0",
+      "style": "h-16 bg-background/80 backdrop-blur-lg border-t flex justify-around items-center z-50",
+      "item_style": "flex flex-col items-center justify-center w-full h-full text-xs font-medium gap-1 transition-colors"
+    },
+    "dashboard_grid": {
+      "mobile": "grid grid-cols-1 gap-4 pb-24",
+      "desktop": "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
+    },
+    "bento_grid": {
+      "wrapper": "grid grid-cols-2 gap-4",
+      "hero_cell": "col-span-2 bg-primary text-primary-foreground p-6 rounded-2xl relative overflow-hidden",
+      "stat_cell": "col-span-1 bg-card p-4 rounded-xl border shadow-sm flex flex-col justify-between"
+    }
+  },
+  "components": {
+    "cards": {
+      "driver_order": "bg-card border-l-4 border-l-primary p-4 rounded-r-xl shadow-sm mb-3",
+      "inventory_item": "flex items-center justify-between p-4 bg-card rounded-xl border mb-2",
+      "transaction_row": "flex justify-between items-center py-3 border-b border-dashed border-border last:border-0"
+    },
+    "buttons": {
+      "primary": "bg-primary text-primary-foreground h-12 rounded-lg font-semibold w-full shadow-md active:scale-95 transition-transform",
+      "secondary": "bg-secondary text-secondary-foreground h-12 rounded-lg font-medium w-full",
+      "ghost": "hover:bg-accent/10 text-accent-foreground h-10 px-4 rounded-lg",
+      "action_fab": "fixed bottom-20 right-6 h-14 w-14 rounded-full bg-primary text-white shadow-xl flex items-center justify-center z-40"
+    },
+    "inputs": {
+      "search": "h-12 bg-muted/50 border-0 focus-visible:ring-1 focus-visible:ring-primary rounded-xl pl-10",
+      "money": "text-3xl font-bold text-center border-b-2 border-border focus:border-primary bg-transparent outline-none h-16 w-full"
+    },
+    "feedback": {
+      "toast": "Use 'sonner' for all notifications.",
+      "loading": "Skeleton loaders matching the shape of the content.",
+      "empty_state": "Minimalist icon + 'No items found' text + Clear CTA."
+    }
+  },
+  "role_specific_guides": {
+    "boss": {
+      "theme": "Command Center. High density data, dark mode preferred for contrast.",
+      "key_features": [
+        "Overview Widgets: Total Revenue, Net Profit (highlighted).",
+        "Pending Collections: List view with 'Mark Paid' swipe actions.",
+        "Settings: Toggle switches for compensation model. Inputs for rates."
+      ]
+    },
+    "customer_service": {
+      "theme": "Efficiency. High contrast, clear buttons.",
+      "key_features": [
+        "Order Form: Address autocomplete (mock), Product search.",
+        "Inventory: Grid of products with Stock Count badges.",
+        "Promo: 'Buy 1 Get 1' auto-tagging in cart."
+      ]
+    },
+    "driver": {
+      "theme": "On-the-Go. Large text, high contrast, minimal clicks.",
+      "key_features": [
+        "Earnings: Big counter at top. Date picker for history.",
+        "Orders: Cards with 'Deliver' slide action.",
+        "Payment: 'Slide to Pay Boss' interaction."
+      ]
+    }
+  },
+  "tech_stack_instructions": {
+    "icons": "lucide-react",
+    "charts": "recharts (via shadcn/ui charts)",
+    "forms": "react-hook-form + zod",
+    "state": "zustand (recommended for global cart/user state) or React Context",
+    "date": "date-fns"
+  },
+  "image_assets": {
+    "logo": "https://images.unsplash.com/photo-1620288627223-53302f4e8c74?w=100&h=100&fit=crop&q=80",
+    "user_avatars": [
+      "https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?w=100&h=100&fit=crop&q=80",
+      "https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=100&h=100&fit=crop&q=80",
+      "https://images.unsplash.com/photo-1599566150163-29194dcaad36?w=100&h=100&fit=crop&q=80"
+    ],
+    "placeholders": {
+      "map": "https://images.unsplash.com/photo-1569336415962-a4bd9f69cd83?w=800&q=80",
+      "empty_box": "https://images.unsplash.com/photo-1595853035070-59a39fe84de3?w=500&q=80"
+    }
+  },
+  "instructions_to_main_agent": [
+    "1. Setup: Install 'lucide-react', 'recharts', 'date-fns', 'clsx', 'tailwind-merge'.",
+    "2. Theme: Implement a 'ThemeProvider' wrapping the app for Dark/Light toggle.",
+    "3. Navigation: Create a persistent 'BottomNav' component that changes options based on User Role.",
+    "4. Mock DB: Create a 'lib/store.js' using Zustand or Context to hold Orders, Inventory, and User Settings in memory (simulate DB).",
+    "5. Testing: Add 'data-testid' to every interactive element (buttons, inputs, cards).",
+    "6. Mobile Optimization: Ensure all click targets are at least 44px. Use 'touch-action-manipulation' on buttons.",
+    "7. Critical: The Boss's 'Settings' page must update the global 'compensation_rate' which immediately reflects in the Driver's 'My Earnings' view."
+  ],
+  "universal_guidelines": [
+    "Avoid generic 'AI slop' designs. Use specific shadcn overrides defined above.",
+    "Dark mode should not be pitch black (#000000) but Slate-950 (#020617).",
+    "Do not use gradients for backgrounds unless specifically for a 'Hero' card.",
+    "Use 'sonner' for all toasts. No default window.alert()."
+  ]
+}
