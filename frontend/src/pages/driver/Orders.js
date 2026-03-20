@@ -14,7 +14,8 @@ import {
   Loader2,
   RefreshCw,
   CheckCircle,
-  Truck
+  Truck,
+  Clock
 } from 'lucide-react';
 
 const DriverOrders = () => {
@@ -38,11 +39,24 @@ const DriverOrders = () => {
     }
   };
 
-  const handleStatusChange = async (orderId, newStatus) => {
+  const handleStartDelivery = async (orderId) => {
     setActionLoading(orderId);
     try {
-      await ordersApi.update(orderId, { status: newStatus });
-      toast.success(`Order marked as ${getStatusLabel(newStatus)}`);
+      await ordersApi.update(orderId, { status: 'in_transit' });
+      toast.success('Delivery started');
+      fetchOrders();
+    } catch (error) {
+      toast.error('Failed to update order');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleMarkDelivered = async (orderId) => {
+    setActionLoading(orderId);
+    try {
+      await ordersApi.update(orderId, { status: 'awaiting_boss_approval' });
+      toast.success('Order marked as delivered! Awaiting boss approval.');
       fetchOrders();
     } catch (error) {
       toast.error('Failed to update order');
@@ -53,7 +67,8 @@ const DriverOrders = () => {
 
   const filteredOrders = orders.filter(order => {
     if (filter === 'all') return true;
-    if (filter === 'active') return ['assigned', 'in_transit'].includes(order.status);
+    if (filter === 'active') return ['pending', 'in_transit'].includes(order.status);
+    if (filter === 'awaiting') return order.status === 'awaiting_boss_approval';
     return order.status === filter;
   });
 
@@ -91,9 +106,10 @@ const DriverOrders = () => {
         <SelectContent>
           <SelectItem value="all">All Orders</SelectItem>
           <SelectItem value="active">Active (To Deliver)</SelectItem>
-          <SelectItem value="assigned">Assigned</SelectItem>
+          <SelectItem value="pending">Pending</SelectItem>
           <SelectItem value="in_transit">In Transit</SelectItem>
-          <SelectItem value="delivered">Delivered</SelectItem>
+          <SelectItem value="awaiting">Awaiting Approval</SelectItem>
+          <SelectItem value="approved">Approved</SelectItem>
         </SelectContent>
       </Select>
 
@@ -144,11 +160,11 @@ const DriverOrders = () => {
                     ))}
                   </div>
 
-                  {/* Actions */}
-                  {order.status === 'assigned' && (
+                  {/* Actions based on status */}
+                  {order.status === 'pending' && (
                     <Button
                       className="w-full"
-                      onClick={() => handleStatusChange(order.id, 'in_transit')}
+                      onClick={() => handleStartDelivery(order.id)}
                       disabled={actionLoading === order.id}
                       data-testid={`start-delivery-${order.id}`}
                     >
@@ -164,7 +180,7 @@ const DriverOrders = () => {
                   {order.status === 'in_transit' && (
                     <Button
                       className="w-full bg-primary"
-                      onClick={() => handleStatusChange(order.id, 'delivered')}
+                      onClick={() => handleMarkDelivered(order.id)}
                       disabled={actionLoading === order.id}
                       data-testid={`complete-delivery-${order.id}`}
                     >
@@ -173,14 +189,21 @@ const DriverOrders = () => {
                       ) : (
                         <CheckCircle className="h-4 w-4 mr-2" />
                       )}
-                      Mark Delivered
+                      Mark as Delivered
                     </Button>
                   )}
 
-                  {order.status === 'delivered' && (
+                  {order.status === 'awaiting_boss_approval' && (
+                    <div className="flex items-center justify-center gap-2 text-orange-600 py-2 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
+                      <Clock className="h-5 w-5" />
+                      <span className="font-medium">Awaiting Boss Approval</span>
+                    </div>
+                  )}
+
+                  {order.status === 'approved' && (
                     <div className="flex items-center justify-center gap-2 text-primary py-2">
                       <CheckCircle className="h-5 w-5" />
-                      <span className="font-medium">Delivered</span>
+                      <span className="font-medium">Approved & Completed</span>
                     </div>
                   )}
 

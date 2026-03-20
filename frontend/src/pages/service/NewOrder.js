@@ -6,7 +6,8 @@ import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { Badge } from '../../components/ui/badge';
 import { ScrollArea } from '../../components/ui/scroll-area';
-import { inventoryApi, ordersApi } from '../../lib/api';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
+import { inventoryApi, ordersApi, usersApi } from '../../lib/api';
 import { formatCurrency } from '../../lib/utils';
 import { toast } from 'sonner';
 import { 
@@ -20,28 +21,36 @@ import {
   AlertTriangle,
   Loader2,
   Check,
-  Search
+  Search,
+  Truck,
+  User
 } from 'lucide-react';
 
 const NewOrder = () => {
   const navigate = useNavigate();
   const [inventory, setInventory] = useState([]);
+  const [drivers, setDrivers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [search, setSearch] = useState('');
   const [address, setAddress] = useState('');
+  const [selectedDriver, setSelectedDriver] = useState('');
   const [cart, setCart] = useState([]);
 
   useEffect(() => {
-    fetchInventory();
+    fetchData();
   }, []);
 
-  const fetchInventory = async () => {
+  const fetchData = async () => {
     try {
-      const response = await inventoryApi.getAll();
-      setInventory(response.data);
+      const [inventoryRes, driversRes] = await Promise.all([
+        inventoryApi.getAll(),
+        usersApi.getDrivers()
+      ]);
+      setInventory(inventoryRes.data);
+      setDrivers(driversRes.data);
     } catch (error) {
-      toast.error('Failed to load inventory');
+      toast.error('Failed to load data');
     } finally {
       setLoading(false);
     }
@@ -157,8 +166,19 @@ const NewOrder = () => {
       return;
     }
     
+    if (!selectedDriver) {
+      toast.error('Please select a driver');
+      return;
+    }
+    
     if (cart.length === 0) {
       toast.error('Cart is empty');
+      return;
+    }
+
+    const driver = drivers.find(d => d.id === selectedDriver);
+    if (!driver) {
+      toast.error('Invalid driver selected');
       return;
     }
 
@@ -167,10 +187,12 @@ const NewOrder = () => {
       await ordersApi.create({
         address: address.trim(),
         items: cart,
-        total: calculateTotal()
+        total: calculateTotal(),
+        driver_id: selectedDriver,
+        driver_name: driver.username
       });
       
-      toast.success('Order created successfully!');
+      toast.success('Order created and assigned to driver!');
       navigate('/service');
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Failed to create order');
@@ -184,7 +206,6 @@ const NewOrder = () => {
   );
 
   const paidItems = cart.filter(c => !c.is_free_gift);
-  const freeItems = cart.filter(c => c.is_free_gift);
 
   if (loading) {
     return (
@@ -225,6 +246,37 @@ const NewOrder = () => {
         </CardContent>
       </Card>
 
+      {/* Driver Selection - REQUIRED */}
+      <Card className="mb-4">
+        <CardContent className="p-4">
+          <Label className="flex items-center gap-2 mb-2">
+            <Truck className="h-4 w-4" />
+            Assign Driver <span className="text-destructive">*</span>
+          </Label>
+          <Select value={selectedDriver} onValueChange={setSelectedDriver}>
+            <SelectTrigger className="h-12" data-testid="driver-select">
+              <SelectValue placeholder="Select a driver..." />
+            </SelectTrigger>
+            <SelectContent>
+              {drivers.length === 0 ? (
+                <div className="p-4 text-center text-muted-foreground">
+                  No drivers available
+                </div>
+              ) : (
+                drivers.map((driver) => (
+                  <SelectItem key={driver.id} value={driver.id}>
+                    <div className="flex items-center gap-2">
+                      <User className="h-4 w-4" />
+                      {driver.username}
+                    </div>
+                  </SelectItem>
+                ))
+              )}
+            </SelectContent>
+          </Select>
+        </CardContent>
+      </Card>
+
       {/* Product Search */}
       <div className="relative mb-4">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -239,7 +291,7 @@ const NewOrder = () => {
 
       {/* Products Grid */}
       <h3 className="text-sm font-semibold text-muted-foreground mb-3">SELECT PRODUCTS</h3>
-      <ScrollArea className="h-[300px] mb-4">
+      <ScrollArea className="h-[250px] mb-4">
         <div className="grid grid-cols-2 gap-3">
           {filteredInventory.map((item) => (
             <Card 
@@ -292,7 +344,7 @@ const NewOrder = () => {
             </CardTitle>
           </CardHeader>
           <CardContent className="pb-4">
-            <ScrollArea className="max-h-[150px] mb-4">
+            <ScrollArea className="max-h-[120px] mb-4">
               <div className="space-y-2">
                 {cart.map((item, index) => (
                   <div 
@@ -349,7 +401,7 @@ const NewOrder = () => {
             <Button
               className="w-full h-12"
               onClick={handleSubmit}
-              disabled={submitting || !address.trim()}
+              disabled={submitting || !address.trim() || !selectedDriver}
               data-testid="submit-order"
             >
               {submitting ? (

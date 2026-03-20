@@ -5,9 +5,10 @@ import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { ScrollArea } from '../../components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs';
-import { statsApi, paymentsApi } from '../../lib/api';
+import { statsApi, paymentsApi, ordersApi } from '../../lib/api';
 import { formatCurrency, formatDateTime, getStatusColor, getStatusLabel } from '../../lib/utils';
 import { toast } from 'sonner';
+import { useTheme } from '../../contexts/ThemeContext';
 import { 
   DollarSign, 
   TrendingUp, 
@@ -21,9 +22,9 @@ import {
   RefreshCw,
   Moon,
   Sun,
-  LogOut
+  LogOut,
+  MapPin
 } from 'lucide-react';
-import { useTheme } from '../../contexts/ThemeContext';
 
 const BossDashboard = () => {
   const { user, logout } = useAuth();
@@ -73,6 +74,19 @@ const BossDashboard = () => {
     }
   };
 
+  const handleApproveOrder = async (orderId) => {
+    setActionLoading(orderId);
+    try {
+      await ordersApi.approve(orderId);
+      toast.success('Order approved! Amount added to financials.');
+      fetchStats();
+    } catch (error) {
+      toast.error('Failed to approve order');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -113,7 +127,7 @@ const BossDashboard = () => {
             </div>
             <p className="money-large">{formatCurrency(stats?.net_profit || 0)}</p>
             <p className="text-sm opacity-80 mt-2">
-              After staff payments from delivered orders
+              From {stats?.approved_orders || 0} approved orders
             </p>
           </CardContent>
         </Card>
@@ -141,17 +155,25 @@ const BossDashboard = () => {
             </div>
             <p className="money-medium">{formatCurrency(stats?.total_staff_payments || 0)}</p>
             <p className="text-xs text-muted-foreground mt-1">
-              {stats?.delivered_orders || 0} delivered
+              {stats?.approved_orders || 0} approved
             </p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Tabs for Pending Collections & Payments */}
-      <Tabs defaultValue="collections" className="w-full">
-        <TabsList className="grid w-full grid-cols-2 mb-4">
+      {/* Tabs for different approval sections */}
+      <Tabs defaultValue="orders" className="w-full">
+        <TabsList className="grid w-full grid-cols-3 mb-4">
+          <TabsTrigger value="orders" data-testid="orders-tab">
+            Orders
+            {stats?.awaiting_approval_count > 0 && (
+              <Badge variant="destructive" className="ml-2">
+                {stats.awaiting_approval_count}
+              </Badge>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="collections" data-testid="collections-tab">
-            Pending Collections
+            Collections
             {stats?.pending_collections?.length > 0 && (
               <Badge variant="secondary" className="ml-2">
                 {stats.pending_collections.length}
@@ -159,7 +181,7 @@ const BossDashboard = () => {
             )}
           </TabsTrigger>
           <TabsTrigger value="payments" data-testid="payments-tab">
-            Payment Requests
+            Payments
             {stats?.pending_payments?.length > 0 && (
               <Badge variant="secondary" className="ml-2">
                 {stats.pending_payments.length}
@@ -167,6 +189,80 @@ const BossDashboard = () => {
             )}
           </TabsTrigger>
         </TabsList>
+
+        {/* Orders Awaiting Approval */}
+        <TabsContent value="orders">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Package className="h-5 w-5" />
+                Awaiting Your Approval
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {stats?.awaiting_approval?.length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <CheckCircle className="h-12 w-12 mx-auto mb-3 opacity-50" />
+                  <p>No orders awaiting approval</p>
+                </div>
+              ) : (
+                <ScrollArea className="max-h-[350px]">
+                  <div className="space-y-3">
+                    {stats?.awaiting_approval?.map((order) => (
+                      <div
+                        key={order.id}
+                        className="p-4 bg-muted/50 rounded-xl border-l-4 border-l-orange-500"
+                        data-testid={`order-approval-${order.id}`}
+                      >
+                        <div className="flex items-start justify-between mb-2">
+                          <div>
+                            <div className="flex items-center gap-2 mb-1">
+                              <Badge className="bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400">
+                                Awaiting Approval
+                              </Badge>
+                            </div>
+                            <div className="flex items-center gap-1 text-sm">
+                              <MapPin className="h-3 w-3" />
+                              <span>{order.address}</span>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Driver: <strong>{order.driver_name}</strong>
+                            </p>
+                          </div>
+                          <p className="font-bold text-xl">{formatCurrency(order.total)}</p>
+                        </div>
+                        <div className="text-xs text-muted-foreground mb-3">
+                          {order.items?.map((item, idx) => (
+                            <span key={idx}>
+                              {item.quantity}x {item.name}
+                              {idx < order.items.length - 1 && ', '}
+                            </span>
+                          ))}
+                        </div>
+                        <Button
+                          className="w-full"
+                          onClick={() => handleApproveOrder(order.id)}
+                          disabled={actionLoading === order.id}
+                          data-testid={`approve-order-${order.id}`}
+                        >
+                          {actionLoading === order.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                          ) : (
+                            <CheckCircle className="h-4 w-4 mr-2" />
+                          )}
+                          Approve Order
+                        </Button>
+                        <p className="text-xs text-muted-foreground mt-2 text-center">
+                          Delivered: {formatDateTime(order.delivered_at)}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </ScrollArea>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
 
         {/* Pending Collections */}
         <TabsContent value="collections">
@@ -219,7 +315,7 @@ const BossDashboard = () => {
             <CardHeader className="pb-3">
               <CardTitle className="text-lg flex items-center gap-2">
                 <Clock className="h-5 w-5" />
-                Pending Approvals
+                Payment Requests
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -252,7 +348,7 @@ const BossDashboard = () => {
                             className="flex-1"
                             onClick={() => handleApprovePayment(payment.id)}
                             disabled={actionLoading === payment.id}
-                            data-testid={`approve-${payment.id}`}
+                            data-testid={`approve-payment-${payment.id}`}
                           >
                             {actionLoading === payment.id ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
@@ -269,7 +365,7 @@ const BossDashboard = () => {
                             className="flex-1"
                             onClick={() => handleRejectPayment(payment.id)}
                             disabled={actionLoading === payment.id}
-                            data-testid={`reject-${payment.id}`}
+                            data-testid={`reject-payment-${payment.id}`}
                           >
                             {actionLoading === payment.id ? (
                               <Loader2 className="h-4 w-4 animate-spin" />

@@ -94,7 +94,7 @@ class Order(BaseModel):
     address: str
     items: List[OrderItem]
     total: float
-    status: str = "pending"  # pending, assigned, in_transit, delivered, cancelled
+    status: str = "pending"  # pending, in_transit, awaiting_boss_approval, approved, cancelled
     driver_id: Optional[str] = None
     driver_name: Optional[str] = None
     created_by: str
@@ -107,6 +107,8 @@ class OrderCreate(BaseModel):
     address: str
     items: List[OrderItem]
     total: float
+    driver_id: str  # Required - must assign driver at creation
+    driver_name: str
 
 class OrderUpdate(BaseModel):
     status: Optional[str] = None
@@ -377,6 +379,11 @@ async def get_today_orders(user = Depends(get_current_user)):
 
 @api_router.post("/orders", response_model=Order)
 async def create_order(order_data: OrderCreate, user = Depends(require_role(["boss", "customer_service"]))):
+    # Validate driver exists
+    driver = await db.users.find_one({"id": order_data.driver_id, "role": "driver"}, {"_id": 0})
+    if not driver:
+        raise HTTPException(status_code=400, detail="Invalid driver selected")
+    
     # Validate and update inventory
     for item in order_data.items:
         if item.is_free_gift:
@@ -399,6 +406,9 @@ async def create_order(order_data: OrderCreate, user = Depends(require_role(["bo
         address=order_data.address,
         items=[OrderItem(**i.model_dump()) for i in order_data.items],
         total=order_data.total,
+        status="pending",  # Order starts as pending, assigned to driver
+        driver_id=order_data.driver_id,
+        driver_name=order_data.driver_name,
         created_by=user["user_id"],
         created_by_name=user["username"]
     )
@@ -414,11 +424,34 @@ async def update_order(order_id: str, update: OrderUpdate, user = Depends(get_cu
     update_data = {k: v for k, v in update.model_dump().items() if v is not None}
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
     
-    # If marking as delivered, set delivered_at
-    if update.status == "delivered":
+    # If driver marks as delivered, set status to awaiting_boss_approval
+    if update.status == "awaiting_boss_approval":
         update_data["delivered_at"] = datetime.now(timezone.utc).isoformat()
     
     await db.orders.update_one({"id": order_id}, {"$set": update_data})
+    
+    updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    return Order(**updated)
+
+# New endpoint for boss to approve delivered orders
+@api_router.put("/orders/{order_id}/approve", response_model=Order)
+async def approve_order(order_id: str, user = Depends(require_role(["boss"]))):
+    existing = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    if not existing:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    if existing["status"] != "awaiting_boss_approval":
+        raise HTTPException(status_code=400, detail="Order is not awaiting approval")
+    
+    await db.orders.update_one(
+        {"id": order_id},
+        {"$set": {
+            "status": "approved",
+            "approved_at": datetime.now(timezone.utc).isoformat(),
+            "approved_by": user["username"],
+            "updated_at": datetime.now(timezone.utc).isoformat()
+        }}
+    )
     
     updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
     return Order(**updated)
@@ -597,38 +630,41 @@ async def get_boss_stats(user = Depends(require_role(["boss"]))):
     # Get all orders
     orders = await db.orders.find({}, {"_id": 0}).to_list(10000)
     
-    # Calculate totals
+    # Calculate totals - only approved orders count for financials
     total_order_value = sum(o["total"] for o in orders)
-    delivered_orders = [o for o in orders if o["status"] == "delivered"]
-    delivered_value = sum(o["total"] for o in delivered_orders)
+    approved_orders = [o for o in orders if o["status"] == "approved"]
+    approved_value = sum(o["total"] for o in approved_orders)
+    
+    # Orders awaiting boss approval
+    awaiting_approval = [o for o in orders if o["status"] == "awaiting_boss_approval"]
     
     # Get settings for payment calculation
     settings = await db.settings.find_one({"id": "global_settings"}, {"_id": 0})
     if not settings:
         settings = Settings().model_dump()
     
-    # Calculate staff payments
+    # Calculate staff payments (only for approved orders)
     total_staff_payments = 0.0
     
     if settings["payment_method"] == "per_package":
-        # Count delivered orders per driver
-        total_staff_payments = len(delivered_orders) * settings["per_package_rate"]
+        # Count approved orders per driver
+        total_staff_payments = len(approved_orders) * settings["per_package_rate"]
     else:
         # Get all logged hours
         hours = await db.driver_hours.find({}, {"_id": 0}).to_list(10000)
         total_hours = sum(h["hours"] for h in hours)
         total_staff_payments = total_hours * settings["hourly_rate"]
     
-    # Get approved payments
+    # Get approved payments from drivers
     approved_payments = await db.payments.find({"status": "approved"}, {"_id": 0}).to_list(10000)
     total_collected = sum(p["amount"] for p in approved_payments)
     
-    # Calculate pending collections per driver
+    # Calculate pending collections per driver (only from approved orders)
     drivers = await db.users.find({"role": "driver"}, {"_id": 0, "password": 0}).to_list(100)
     pending_collections = []
     
     for driver in drivers:
-        driver_orders = [o for o in delivered_orders if o.get("driver_id") == driver["id"]]
+        driver_orders = [o for o in approved_orders if o.get("driver_id") == driver["id"]]
         driver_sales = sum(o["total"] for o in driver_orders)
         
         # Calculate driver's earnings
@@ -666,13 +702,15 @@ async def get_boss_stats(user = Depends(require_role(["boss"]))):
     return {
         "total_order_value": total_order_value,
         "total_staff_payments": total_staff_payments,
-        "net_profit": delivered_value - total_staff_payments,
+        "net_profit": approved_value - total_staff_payments,
         "total_collected": total_collected,
         "pending_collections": pending_collections,
         "pending_payments": [Payment(**p).model_dump() for p in pending_payments],
+        "awaiting_approval": [Order(**o).model_dump() for o in awaiting_approval],
         "total_orders": len(orders),
-        "delivered_orders": len(delivered_orders),
-        "pending_orders": len([o for o in orders if o["status"] == "pending"])
+        "approved_orders": len(approved_orders),
+        "pending_orders": len([o for o in orders if o["status"] == "pending"]),
+        "awaiting_approval_count": len(awaiting_approval)
     }
 
 @api_router.get("/stats/driver")
@@ -682,54 +720,48 @@ async def get_driver_stats(date: Optional[str] = None, user = Depends(require_ro
     if not settings:
         settings = Settings().model_dump()
     
-    # Build query for orders
-    query = {"driver_id": user["user_id"]}
-    if date:
-        query["delivered_at"] = {"$regex": f"^{date}"}
-    
-    # Get driver's delivered orders
-    delivered_orders = await db.orders.find({
-        **query,
-        "status": "delivered"
+    # Get ALL orders for this driver (no date filter for totals)
+    all_driver_orders = await db.orders.find({
+        "driver_id": user["user_id"]
     }, {"_id": 0}).to_list(10000)
     
-    total_sales = sum(o["total"] for o in delivered_orders)
-    packages_delivered = len(delivered_orders)
+    # Only approved orders count for financial calculations
+    approved_orders = [o for o in all_driver_orders if o["status"] == "approved"]
+    
+    total_sales = sum(o["total"] for o in approved_orders)
+    packages_delivered = len(approved_orders)
     
     # Calculate earnings
     if settings["payment_method"] == "per_package":
         earnings = packages_delivered * settings["per_package_rate"]
         hours_logged = None
     else:
-        # Get hours for the date
-        hours_query = {"driver_id": user["user_id"]}
-        if date:
-            hours_query["date"] = date
-        
-        hours_records = await db.driver_hours.find(hours_query, {"_id": 0}).to_list(1000)
+        # Get all hours logged
+        hours_records = await db.driver_hours.find({"driver_id": user["user_id"]}, {"_id": 0}).to_list(1000)
         hours_logged = sum(h["hours"] for h in hours_records)
         earnings = hours_logged * settings["hourly_rate"]
     
-    # Calculate holding (to boss)
+    # Calculate holding (to boss) - only from approved orders
     holding = total_sales - earnings
     
     # Get approved payments
-    payment_query = {"driver_id": user["user_id"], "status": "approved"}
-    approved_payments = await db.payments.find(payment_query, {"_id": 0}).to_list(1000)
+    approved_payments = await db.payments.find({
+        "driver_id": user["user_id"], 
+        "status": "approved"
+    }, {"_id": 0}).to_list(1000)
     total_paid = sum(p["amount"] for p in approved_payments)
     
-    # Pending amount
+    # Pending amount to boss
     pending_to_boss = max(0, holding - total_paid)
     
-    # Today's stats
+    # Today's stats - ALL orders assigned today (regardless of status)
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    today_orders = await db.orders.find({
-        "driver_id": user["user_id"],
-        "created_at": {"$regex": f"^{today}"}
-    }, {"_id": 0}).to_list(1000)
+    today_orders = [o for o in all_driver_orders if o["created_at"].startswith(today)]
     
-    today_delivered = [o for o in today_orders if o["status"] == "delivered"]
-    today_pending = [o for o in today_orders if o["status"] in ["pending", "assigned", "in_transit"]]
+    today_pending = [o for o in today_orders if o["status"] == "pending"]
+    today_in_transit = [o for o in today_orders if o["status"] == "in_transit"]
+    today_awaiting = [o for o in today_orders if o["status"] == "awaiting_boss_approval"]
+    today_approved = [o for o in today_orders if o["status"] == "approved"]
     
     return {
         "payment_method": settings["payment_method"],
@@ -743,9 +775,9 @@ async def get_driver_stats(date: Optional[str] = None, user = Depends(require_ro
         "total_paid": total_paid,
         "pending_to_boss": pending_to_boss,
         "today_orders": len(today_orders),
-        "today_delivered": len(today_delivered),
-        "today_pending": len(today_pending),
-        "today_revenue": sum(o["total"] for o in today_delivered)
+        "today_pending": len(today_pending) + len(today_in_transit),
+        "today_delivered": len(today_awaiting) + len(today_approved),
+        "today_revenue": sum(o["total"] for o in today_approved)
     }
 
 # ============== SEED DATA ROUTE ==============

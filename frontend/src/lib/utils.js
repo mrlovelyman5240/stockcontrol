@@ -40,11 +40,10 @@ export function formatTime(dateString) {
 export function getStatusColor(status) {
   const colors = {
     pending: 'status-pending',
-    assigned: 'status-assigned',
     in_transit: 'status-in_transit',
-    delivered: 'status-delivered',
-    cancelled: 'status-cancelled',
+    awaiting_boss_approval: 'status-awaiting',
     approved: 'status-approved',
+    cancelled: 'status-cancelled',
     rejected: 'status-rejected',
   };
   return colors[status] || 'bg-muted text-muted-foreground';
@@ -53,11 +52,10 @@ export function getStatusColor(status) {
 export function getStatusLabel(status) {
   const labels = {
     pending: 'Pending',
-    assigned: 'Assigned',
     in_transit: 'In Transit',
-    delivered: 'Delivered',
-    cancelled: 'Cancelled',
+    awaiting_boss_approval: 'Awaiting Approval',
     approved: 'Approved',
+    cancelled: 'Cancelled',
     rejected: 'Rejected',
   };
   return labels[status] || status;
@@ -73,5 +71,12 @@ export function getRoleLabel(role) {
 }
 
 export function getOrderBorderColor(status) {
-  return `order-border-${status}`;
+  const colors = {
+    pending: 'border-l-amber-500',
+    in_transit: 'border-l-purple-500',
+    awaiting_boss_approval: 'border-l-orange-500',
+    approved: 'border-l-emerald-500',
+    cancelled: 'border-l-red-500',
+  };
+  return colors[status] || 'border-l-muted';
 }

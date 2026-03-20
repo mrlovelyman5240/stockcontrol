@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
+import { Card, CardContent } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
@@ -13,15 +13,14 @@ import {
   Search, 
   MapPin, 
   Package,
-  User,
   Loader2,
   RefreshCw,
-  Truck
+  Truck,
+  CheckCircle
 } from 'lucide-react';
 
 const BossOrders = () => {
   const [orders, setOrders] = useState([]);
-  const [drivers, setDrivers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
@@ -33,12 +32,8 @@ const BossOrders = () => {
 
   const fetchData = async () => {
     try {
-      const [ordersRes, driversRes] = await Promise.all([
-        ordersApi.getAll(),
-        usersApi.getDrivers()
-      ]);
+      const ordersRes = await ordersApi.getAll();
       setOrders(ordersRes.data);
-      setDrivers(driversRes.data);
     } catch (error) {
       toast.error('Failed to load data');
     } finally {
@@ -46,34 +41,14 @@ const BossOrders = () => {
     }
   };
 
-  const handleAssignDriver = async (orderId, driverId) => {
-    const driver = drivers.find(d => d.id === driverId);
-    if (!driver) return;
-
+  const handleApproveOrder = async (orderId) => {
     setActionLoading(orderId);
     try {
-      await ordersApi.update(orderId, {
-        driver_id: driverId,
-        driver_name: driver.username,
-        status: 'assigned'
-      });
-      toast.success(`Order assigned to ${driver.username}`);
+      await ordersApi.approve(orderId);
+      toast.success('Order approved!');
       fetchData();
     } catch (error) {
-      toast.error('Failed to assign driver');
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
-  const handleStatusChange = async (orderId, newStatus) => {
-    setActionLoading(orderId);
-    try {
-      await ordersApi.update(orderId, { status: newStatus });
-      toast.success(`Order status updated to ${getStatusLabel(newStatus)}`);
-      fetchData();
-    } catch (error) {
-      toast.error('Failed to update status');
+      toast.error('Failed to approve order');
     } finally {
       setActionLoading(null);
     }
@@ -82,7 +57,8 @@ const BossOrders = () => {
   const filteredOrders = orders.filter(order => {
     const matchesFilter = filter === 'all' || order.status === filter;
     const matchesSearch = order.address.toLowerCase().includes(search.toLowerCase()) ||
-                         order.id.toLowerCase().includes(search.toLowerCase());
+                         order.id.toLowerCase().includes(search.toLowerCase()) ||
+                         (order.driver_name && order.driver_name.toLowerCase().includes(search.toLowerCase()));
     return matchesFilter && matchesSearch;
   });
 
@@ -103,7 +79,7 @@ const BossOrders = () => {
             <ClipboardList className="h-5 w-5 text-primary" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold">Orders</h1>
+            <h1 className="text-2xl font-bold">All Orders</h1>
             <p className="text-muted-foreground">{orders.length} total orders</p>
           </div>
         </div>
@@ -117,7 +93,7 @@ const BossOrders = () => {
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search by address..."
+            placeholder="Search by address or driver..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="pl-10"
@@ -125,15 +101,15 @@ const BossOrders = () => {
           />
         </div>
         <Select value={filter} onValueChange={setFilter}>
-          <SelectTrigger className="w-[140px]" data-testid="filter-orders">
+          <SelectTrigger className="w-[160px]" data-testid="filter-orders">
             <SelectValue placeholder="Filter" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All</SelectItem>
             <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="assigned">Assigned</SelectItem>
             <SelectItem value="in_transit">In Transit</SelectItem>
-            <SelectItem value="delivered">Delivered</SelectItem>
+            <SelectItem value="awaiting_boss_approval">Awaiting Approval</SelectItem>
+            <SelectItem value="approved">Approved</SelectItem>
             <SelectItem value="cancelled">Cancelled</SelectItem>
           </SelectContent>
         </Select>
@@ -184,54 +160,32 @@ const BossOrders = () => {
                     ))}
                   </div>
 
-                  {/* Driver Assignment */}
-                  {order.status === 'pending' && (
-                    <Select
-                      onValueChange={(driverId) => handleAssignDriver(order.id, driverId)}
-                      disabled={actionLoading === order.id}
-                    >
-                      <SelectTrigger className="w-full" data-testid={`assign-driver-${order.id}`}>
-                        <SelectValue placeholder="Assign to driver..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {drivers.map((driver) => (
-                          <SelectItem key={driver.id} value={driver.id}>
-                            <div className="flex items-center gap-2">
-                              <User className="h-4 w-4" />
-                              {driver.username}
-                            </div>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-
-                  {/* Assigned Driver Info */}
-                  {order.driver_name && (
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-sm">
-                        <Truck className="h-4 w-4 text-muted-foreground" />
-                        <span>Driver: <strong>{order.driver_name}</strong></span>
-                      </div>
-                      {order.status !== 'delivered' && order.status !== 'cancelled' && (
-                        <Select
-                          value={order.status}
-                          onValueChange={(status) => handleStatusChange(order.id, status)}
-                          disabled={actionLoading === order.id}
-                        >
-                          <SelectTrigger className="w-[130px]" data-testid={`status-${order.id}`}>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="assigned">Assigned</SelectItem>
-                            <SelectItem value="in_transit">In Transit</SelectItem>
-                            <SelectItem value="delivered">Delivered</SelectItem>
-                            <SelectItem value="cancelled">Cancelled</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      )}
+                  {/* Driver Info */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-sm">
+                      <Truck className="h-4 w-4 text-muted-foreground" />
+                      <span>Driver: <strong>{order.driver_name || 'Not assigned'}</strong></span>
                     </div>
-                  )}
+                    
+                    {/* Approve button for awaiting orders */}
+                    {order.status === 'awaiting_boss_approval' && (
+                      <Button
+                        size="sm"
+                        onClick={() => handleApproveOrder(order.id)}
+                        disabled={actionLoading === order.id}
+                        data-testid={`approve-order-${order.id}`}
+                      >
+                        {actionLoading === order.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <>
+                            <CheckCircle className="h-4 w-4 mr-1" />
+                            Approve
+                          </>
+                        )}
+                      </Button>
+                    )}
+                  </div>
 
                   {/* Timestamp */}
                   <p className="text-xs text-muted-foreground mt-3">
