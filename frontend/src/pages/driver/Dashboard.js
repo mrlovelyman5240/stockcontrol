@@ -15,12 +15,13 @@ import {
   RefreshCw,
   TrendingUp,
   Moon,
-  Sun
+  Sun,
+  LogOut
 } from 'lucide-react';
 import { useTheme } from '../../contexts/ThemeContext';
 
 const DriverDashboard = () => {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const navigate = useNavigate();
   const { resolvedTheme, toggleTheme } = useTheme();
   const [stats, setStats] = useState(null);
@@ -63,6 +64,9 @@ const DriverDashboard = () => {
           </Button>
           <Button variant="ghost" size="icon" onClick={fetchStats} data-testid="refresh-stats">
             <RefreshCw className="h-5 w-5" />
+          </Button>
+          <Button variant="ghost" size="icon" onClick={logout} className="text-destructive hover:text-destructive" data-testid="logout-btn">
+            <LogOut className="h-5 w-5" />
           </Button>
         </div>
       </div>

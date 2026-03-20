@@ -20,12 +20,13 @@ import {
   Loader2,
   RefreshCw,
   Moon,
-  Sun
+  Sun,
+  LogOut
 } from 'lucide-react';
 import { useTheme } from '../../contexts/ThemeContext';
 
 const BossDashboard = () => {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const { resolvedTheme, toggleTheme } = useTheme();
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -94,6 +95,9 @@ const BossDashboard = () => {
           </Button>
           <Button variant="ghost" size="icon" onClick={fetchStats} data-testid="refresh-stats">
             <RefreshCw className="h-5 w-5" />
+          </Button>
+          <Button variant="ghost" size="icon" onClick={logout} className="text-destructive hover:text-destructive" data-testid="logout-btn">
+            <LogOut className="h-5 w-5" />
           </Button>
         </div>
       </div>
