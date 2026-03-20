@@ -33,8 +33,8 @@ const BottomNav = () => {
         return [
           { icon: LayoutDashboard, label: 'Dashboard', path: '/service' },
           { icon: ShoppingCart, label: 'New Order', path: '/service/new-order' },
+          { icon: ClipboardList, label: 'Orders', path: '/service/orders' },
           { icon: Package, label: 'Inventory', path: '/service/inventory' },
-          { icon: User, label: 'Profile', path: '/service/profile' },
         ];
       case 'driver':
         return [

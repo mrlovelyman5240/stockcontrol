@@ -18,6 +18,7 @@ import AuditLog from "./pages/boss/AuditLog";
 // Customer Service Pages
 import ServiceDashboard from "./pages/service/Dashboard";
 import NewOrder from "./pages/service/NewOrder";
+import ServiceOrders from "./pages/service/Orders";
 import ServiceInventory from "./pages/service/Inventory";
 import ServiceProfile from "./pages/service/Profile";
 
@@ -169,7 +170,7 @@ function AppRoutes() {
           path="/service/orders"
           element={
             <ProtectedRoute allowedRoles={['customer_service']}>
-              <ServiceDashboard />
+              <ServiceOrders />
             </ProtectedRoute>
           }
         />

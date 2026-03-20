@@ -14,7 +14,6 @@ import {
   Loader2,
   RefreshCw,
   CheckCircle,
-  Truck,
   Clock
 } from 'lucide-react';
 
@@ -22,7 +21,6 @@ const DriverOrders = () => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
-  const [actionLoading, setActionLoading] = useState(null);
 
   useEffect(() => {
     fetchOrders();
@@ -39,37 +37,16 @@ const DriverOrders = () => {
     }
   };
 
-  const handleStartDelivery = async (orderId) => {
-    setActionLoading(orderId);
-    try {
-      await ordersApi.update(orderId, { status: 'in_transit' });
-      toast.success('Delivery started');
-      fetchOrders();
-    } catch (error) {
-      toast.error('Failed to update order');
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
-  const handleMarkDelivered = async (orderId) => {
-    setActionLoading(orderId);
-    try {
-      await ordersApi.update(orderId, { status: 'awaiting_boss_approval' });
-      toast.success('Order marked as delivered! Awaiting boss approval.');
-      fetchOrders();
-    } catch (error) {
-      toast.error('Failed to update order');
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
   const filteredOrders = orders.filter(order => {
     if (filter === 'all') return true;
-    if (filter === 'active') return ['pending', 'in_transit'].includes(order.status);
-    if (filter === 'awaiting') return order.status === 'awaiting_boss_approval';
     return order.status === filter;
+  });
+
+  // Sort: pending first
+  const sortedOrders = [...filteredOrders].sort((a, b) => {
+    if (a.status === 'pending' && b.status !== 'pending') return -1;
+    if (a.status !== 'pending' && b.status === 'pending') return 1;
+    return new Date(b.created_at) - new Date(a.created_at);
   });
 
   if (loading) {
@@ -79,6 +56,9 @@ const DriverOrders = () => {
       </div>
     );
   }
+
+  const pendingCount = orders.filter(o => o.status === 'pending').length;
+  const completedCount = orders.filter(o => o.status === 'completed').length;
 
   return (
     <div className="p-4 max-w-2xl mx-auto" data-testid="driver-orders">
@@ -90,7 +70,9 @@ const DriverOrders = () => {
           </div>
           <div>
             <h1 className="text-2xl font-bold">My Orders</h1>
-            <p className="text-muted-foreground">{orders.length} orders assigned</p>
+            <p className="text-muted-foreground">
+              {pendingCount} pending · {completedCount} completed
+            </p>
           </div>
         </div>
         <Button variant="ghost" size="icon" onClick={fetchOrders} data-testid="refresh-orders">
@@ -105,24 +87,21 @@ const DriverOrders = () => {
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="all">All Orders</SelectItem>
-          <SelectItem value="active">Active (To Deliver)</SelectItem>
-          <SelectItem value="pending">Pending</SelectItem>
-          <SelectItem value="in_transit">In Transit</SelectItem>
-          <SelectItem value="awaiting">Awaiting Approval</SelectItem>
-          <SelectItem value="approved">Approved</SelectItem>
+          <SelectItem value="pending">Pending (To Deliver)</SelectItem>
+          <SelectItem value="completed">Completed</SelectItem>
         </SelectContent>
       </Select>
 
       {/* Orders List */}
       <ScrollArea className="h-[calc(100vh-280px)]">
         <div className="space-y-3">
-          {filteredOrders.length === 0 ? (
+          {sortedOrders.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
               <Package className="h-12 w-12 mx-auto mb-3 opacity-50" />
               <p>No orders found</p>
             </div>
           ) : (
-            filteredOrders.map((order) => (
+            sortedOrders.map((order) => (
               <Card
                 key={order.id}
                 className={`border-l-4 ${getOrderBorderColor(order.status)}`}
@@ -160,50 +139,18 @@ const DriverOrders = () => {
                     ))}
                   </div>
 
-                  {/* Actions based on status */}
+                  {/* Status Display */}
                   {order.status === 'pending' && (
-                    <Button
-                      className="w-full"
-                      onClick={() => handleStartDelivery(order.id)}
-                      disabled={actionLoading === order.id}
-                      data-testid={`start-delivery-${order.id}`}
-                    >
-                      {actionLoading === order.id ? (
-                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                      ) : (
-                        <Truck className="h-4 w-4 mr-2" />
-                      )}
-                      Start Delivery
-                    </Button>
-                  )}
-
-                  {order.status === 'in_transit' && (
-                    <Button
-                      className="w-full bg-primary"
-                      onClick={() => handleMarkDelivered(order.id)}
-                      disabled={actionLoading === order.id}
-                      data-testid={`complete-delivery-${order.id}`}
-                    >
-                      {actionLoading === order.id ? (
-                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                      ) : (
-                        <CheckCircle className="h-4 w-4 mr-2" />
-                      )}
-                      Mark as Delivered
-                    </Button>
-                  )}
-
-                  {order.status === 'awaiting_boss_approval' && (
-                    <div className="flex items-center justify-center gap-2 text-orange-600 py-2 bg-orange-50 dark:bg-orange-900/20 rounded-lg">
+                    <div className="flex items-center justify-center gap-2 text-amber-600 py-2 bg-amber-50 dark:bg-amber-900/20 rounded-lg">
                       <Clock className="h-5 w-5" />
-                      <span className="font-medium">Awaiting Boss Approval</span>
+                      <span className="font-medium">Pending - Deliver to customer</span>
                     </div>
                   )}
 
-                  {order.status === 'approved' && (
+                  {order.status === 'completed' && (
                     <div className="flex items-center justify-center gap-2 text-primary py-2">
                       <CheckCircle className="h-5 w-5" />
-                      <span className="font-medium">Approved & Completed</span>
+                      <span className="font-medium">Completed</span>
                     </div>
                   )}
 
@@ -217,6 +164,11 @@ const DriverOrders = () => {
           )}
         </div>
       </ScrollArea>
+
+      {/* Info Note */}
+      <div className="mt-4 p-3 bg-muted/50 rounded-lg text-center text-sm text-muted-foreground">
+        <p>Customer Service will mark orders as "Done" after delivery confirmation</p>
+      </div>
     </div>
   );
 };

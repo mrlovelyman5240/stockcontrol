@@ -53,7 +53,7 @@ export const ordersApi = {
   getToday: () => api.get('/orders/today'),
   create: (data) => api.post('/orders', data),
   update: (id, data) => api.put(`/orders/${id}`, data),
-  approve: (id) => api.put(`/orders/${id}/approve`),
+  complete: (id) => api.put(`/orders/${id}/complete`),
   delete: (id) => api.delete(`/orders/${id}`),
 };
 

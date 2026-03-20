@@ -5,15 +5,14 @@ import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { ScrollArea } from '../../components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs';
-import { statsApi, paymentsApi, ordersApi } from '../../lib/api';
-import { formatCurrency, formatDateTime, getStatusColor, getStatusLabel } from '../../lib/utils';
+import { statsApi, paymentsApi } from '../../lib/api';
+import { formatCurrency, formatDateTime } from '../../lib/utils';
 import { toast } from 'sonner';
 import { useTheme } from '../../contexts/ThemeContext';
 import { 
   DollarSign, 
   TrendingUp, 
   Users, 
-  Package,
   Wallet,
   CheckCircle,
   XCircle,
@@ -23,7 +22,7 @@ import {
   Moon,
   Sun,
   LogOut,
-  MapPin
+  Package
 } from 'lucide-react';
 
 const BossDashboard = () => {
@@ -74,19 +73,6 @@ const BossDashboard = () => {
     }
   };
 
-  const handleApproveOrder = async (orderId) => {
-    setActionLoading(orderId);
-    try {
-      await ordersApi.approve(orderId);
-      toast.success('Order approved! Amount added to financials.');
-      fetchStats();
-    } catch (error) {
-      toast.error('Failed to approve order');
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -116,32 +102,50 @@ const BossDashboard = () => {
         </div>
       </div>
 
-      {/* Stats Grid */}
+      {/* Hero Card - Net Profit */}
+      <Card className="hero-gradient text-white mb-6" data-testid="net-profit-card">
+        <CardContent className="p-6">
+          <div className="flex items-center gap-2 mb-2 opacity-90">
+            <TrendingUp className="h-5 w-5" />
+            <span className="text-sm font-medium">Net Profit (Finalized)</span>
+          </div>
+          <p className="money-large">{formatCurrency(stats?.net_profit || 0)}</p>
+          <p className="text-sm opacity-80 mt-2">
+            From {stats?.completed_count || 0} completed orders
+          </p>
+        </CardContent>
+      </Card>
+
+      {/* Financial Stats Grid */}
       <div className="grid grid-cols-2 gap-4 mb-6">
-        {/* Hero Card - Net Profit */}
-        <Card className="col-span-2 hero-gradient text-white" data-testid="net-profit-card">
-          <CardContent className="p-6">
-            <div className="flex items-center gap-2 mb-2 opacity-90">
-              <TrendingUp className="h-5 w-5" />
-              <span className="text-sm font-medium">Net Profit</span>
+        {/* Pending Revenue (Out on Delivery) */}
+        <Card className="bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800" data-testid="pending-revenue-card">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 mb-2">
+              <Clock className="h-4 w-4" />
+              <span className="text-xs font-medium">Pending Revenue</span>
             </div>
-            <p className="money-large">{formatCurrency(stats?.net_profit || 0)}</p>
-            <p className="text-sm opacity-80 mt-2">
-              From {stats?.approved_orders || 0} approved orders
+            <p className="text-xl font-bold text-amber-800 dark:text-amber-300">
+              {formatCurrency(stats?.pending_revenue || 0)}
+            </p>
+            <p className="text-xs text-amber-600 dark:text-amber-500">
+              {stats?.pending_count || 0} orders out
             </p>
           </CardContent>
         </Card>
 
-        {/* Total Order Value */}
-        <Card data-testid="total-orders-card">
+        {/* Total Revenue (Finalized) */}
+        <Card className="bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800" data-testid="total-revenue-card">
           <CardContent className="p-4">
-            <div className="flex items-center gap-2 text-muted-foreground mb-2">
+            <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 mb-2">
               <DollarSign className="h-4 w-4" />
-              <span className="text-xs font-medium">Total Orders</span>
+              <span className="text-xs font-medium">Total Revenue</span>
             </div>
-            <p className="money-medium">{formatCurrency(stats?.total_order_value || 0)}</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              {stats?.total_orders || 0} orders
+            <p className="text-xl font-bold text-emerald-800 dark:text-emerald-300">
+              {formatCurrency(stats?.total_revenue || 0)}
+            </p>
+            <p className="text-xs text-emerald-600 dark:text-emerald-500">
+              Finalized sales
             </p>
           </CardContent>
         </Card>
@@ -153,25 +157,31 @@ const BossDashboard = () => {
               <Users className="h-4 w-4" />
               <span className="text-xs font-medium">Staff Payments</span>
             </div>
-            <p className="money-medium">{formatCurrency(stats?.total_staff_payments || 0)}</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              {stats?.approved_orders || 0} approved
+            <p className="text-xl font-bold">{formatCurrency(stats?.total_staff_payments || 0)}</p>
+            <p className="text-xs text-muted-foreground">
+              {stats?.completed_count || 0} deliveries
+            </p>
+          </CardContent>
+        </Card>
+
+        {/* Total Orders */}
+        <Card data-testid="total-orders-card">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-muted-foreground mb-2">
+              <Package className="h-4 w-4" />
+              <span className="text-xs font-medium">Total Orders</span>
+            </div>
+            <p className="text-xl font-bold">{stats?.total_orders || 0}</p>
+            <p className="text-xs text-muted-foreground">
+              all time
             </p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Tabs for different approval sections */}
-      <Tabs defaultValue="orders" className="w-full">
-        <TabsList className="grid w-full grid-cols-3 mb-4">
-          <TabsTrigger value="orders" data-testid="orders-tab">
-            Orders
-            {stats?.awaiting_approval_count > 0 && (
-              <Badge variant="destructive" className="ml-2">
-                {stats.awaiting_approval_count}
-              </Badge>
-            )}
-          </TabsTrigger>
+      {/* Tabs */}
+      <Tabs defaultValue="collections" className="w-full">
+        <TabsList className="grid w-full grid-cols-2 mb-4">
           <TabsTrigger value="collections" data-testid="collections-tab">
             Collections
             {stats?.pending_collections?.length > 0 && (
@@ -190,87 +200,13 @@ const BossDashboard = () => {
           </TabsTrigger>
         </TabsList>
 
-        {/* Orders Awaiting Approval */}
-        <TabsContent value="orders">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Package className="h-5 w-5" />
-                Awaiting Your Approval
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {stats?.awaiting_approval?.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <CheckCircle className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                  <p>No orders awaiting approval</p>
-                </div>
-              ) : (
-                <ScrollArea className="max-h-[350px]">
-                  <div className="space-y-3">
-                    {stats?.awaiting_approval?.map((order) => (
-                      <div
-                        key={order.id}
-                        className="p-4 bg-muted/50 rounded-xl border-l-4 border-l-orange-500"
-                        data-testid={`order-approval-${order.id}`}
-                      >
-                        <div className="flex items-start justify-between mb-2">
-                          <div>
-                            <div className="flex items-center gap-2 mb-1">
-                              <Badge className="bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400">
-                                Awaiting Approval
-                              </Badge>
-                            </div>
-                            <div className="flex items-center gap-1 text-sm">
-                              <MapPin className="h-3 w-3" />
-                              <span>{order.address}</span>
-                            </div>
-                            <p className="text-xs text-muted-foreground mt-1">
-                              Driver: <strong>{order.driver_name}</strong>
-                            </p>
-                          </div>
-                          <p className="font-bold text-xl">{formatCurrency(order.total)}</p>
-                        </div>
-                        <div className="text-xs text-muted-foreground mb-3">
-                          {order.items?.map((item, idx) => (
-                            <span key={idx}>
-                              {item.quantity}x {item.name}
-                              {idx < order.items.length - 1 && ', '}
-                            </span>
-                          ))}
-                        </div>
-                        <Button
-                          className="w-full"
-                          onClick={() => handleApproveOrder(order.id)}
-                          disabled={actionLoading === order.id}
-                          data-testid={`approve-order-${order.id}`}
-                        >
-                          {actionLoading === order.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                          ) : (
-                            <CheckCircle className="h-4 w-4 mr-2" />
-                          )}
-                          Approve Order
-                        </Button>
-                        <p className="text-xs text-muted-foreground mt-2 text-center">
-                          Delivered: {formatDateTime(order.delivered_at)}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </ScrollArea>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
         {/* Pending Collections */}
         <TabsContent value="collections">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-lg flex items-center gap-2">
                 <Wallet className="h-5 w-5" />
-                Driver Holdings
+                Driver Holdings (from completed orders)
               </CardTitle>
             </CardHeader>
             <CardContent>

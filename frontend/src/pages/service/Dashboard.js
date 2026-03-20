@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { useTheme } from '../../contexts/ThemeContext';
 import { Card, CardContent } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { ordersApi, inventoryApi } from '../../lib/api';
@@ -16,15 +17,23 @@ import {
   RefreshCw,
   Moon,
   Sun,
-  LogOut
+  LogOut,
+  Clock,
+  CheckCircle
 } from 'lucide-react';
-import { useTheme } from '../../contexts/ThemeContext';
 
 const ServiceDashboard = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const { resolvedTheme, toggleTheme } = useTheme();
-  const [stats, setStats] = useState({ orders: 0, todayOrders: 0, lowStock: 0, totalRevenue: 0 });
+  const [stats, setStats] = useState({ 
+    orders: 0, 
+    pendingOrders: 0, 
+    completedOrders: 0,
+    pendingRevenue: 0,
+    completedRevenue: 0,
+    lowStock: 0 
+  });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -41,16 +50,17 @@ const ServiceDashboard = () => {
       const orders = ordersRes.data;
       const inventory = inventoryRes.data;
       
-      const today = new Date().toISOString().split('T')[0];
-      const todayOrders = orders.filter(o => o.created_at.startsWith(today));
+      const pendingOrders = orders.filter(o => o.status === 'pending');
+      const completedOrders = orders.filter(o => o.status === 'completed');
       const lowStockItems = inventory.filter(i => i.stock <= 5);
-      const totalRevenue = orders.reduce((sum, o) => sum + o.total, 0);
 
       setStats({
         orders: orders.length,
-        todayOrders: todayOrders.length,
-        lowStock: lowStockItems.length,
-        totalRevenue
+        pendingOrders: pendingOrders.length,
+        completedOrders: completedOrders.length,
+        pendingRevenue: pendingOrders.reduce((sum, o) => sum + o.total, 0),
+        completedRevenue: completedOrders.reduce((sum, o) => sum + o.total, 0),
+        lowStock: lowStockItems.length
       });
     } catch (error) {
       toast.error('Failed to load statistics');
@@ -107,16 +117,51 @@ const ServiceDashboard = () => {
         </CardContent>
       </Card>
 
-      {/* Stats Grid */}
+      {/* Financial Stats - Pending vs Finalized */}
+      <div className="grid grid-cols-2 gap-4 mb-6">
+        {/* Pending Revenue (Out on Delivery) */}
+        <Card className="bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800" data-testid="pending-revenue-card">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 mb-2">
+              <Clock className="h-4 w-4" />
+              <span className="text-xs font-medium">Pending Revenue</span>
+            </div>
+            <p className="text-2xl font-bold text-amber-800 dark:text-amber-300">
+              {formatCurrency(stats.pendingRevenue)}
+            </p>
+            <p className="text-xs text-amber-600 dark:text-amber-500">
+              {stats.pendingOrders} orders out
+            </p>
+          </CardContent>
+        </Card>
+
+        {/* Finalized Revenue (Completed) */}
+        <Card className="bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800" data-testid="completed-revenue-card">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 mb-2">
+              <CheckCircle className="h-4 w-4" />
+              <span className="text-xs font-medium">Total Revenue</span>
+            </div>
+            <p className="text-2xl font-bold text-emerald-800 dark:text-emerald-300">
+              {formatCurrency(stats.completedRevenue)}
+            </p>
+            <p className="text-xs text-emerald-600 dark:text-emerald-500">
+              {stats.completedOrders} completed
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Other Stats */}
       <div className="grid grid-cols-2 gap-4 mb-6">
         <Card className="card-hover cursor-pointer" onClick={() => navigate('/service/orders')} data-testid="orders-stat">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 text-muted-foreground mb-2">
               <ClipboardList className="h-4 w-4" />
-              <span className="text-xs font-medium">Today's Orders</span>
+              <span className="text-xs font-medium">All Orders</span>
             </div>
-            <p className="text-3xl font-bold">{stats.todayOrders}</p>
-            <p className="text-xs text-muted-foreground">{stats.orders} total</p>
+            <p className="text-3xl font-bold">{stats.orders}</p>
+            <p className="text-xs text-muted-foreground">total orders</p>
           </CardContent>
         </Card>
 
@@ -132,23 +177,6 @@ const ServiceDashboard = () => {
             <p className="text-xs text-muted-foreground">items ≤ 5 units</p>
           </CardContent>
         </Card>
-
-        <Card className="col-span-2" data-testid="revenue-stat">
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2 text-muted-foreground mb-2">
-                  <TrendingUp className="h-4 w-4" />
-                  <span className="text-xs font-medium">Total Revenue</span>
-                </div>
-                <p className="text-3xl font-bold">{formatCurrency(stats.totalRevenue)}</p>
-              </div>
-              <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
-                <TrendingUp className="h-6 w-6 text-primary" />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
       {/* Quick Actions */}
@@ -162,6 +190,15 @@ const ServiceDashboard = () => {
         >
           <ShoppingCart className="h-5 w-5 mr-3" />
           Create New Order
+        </Button>
+        <Button 
+          variant="outline" 
+          className="w-full justify-start h-12"
+          onClick={() => navigate('/service/orders')}
+          data-testid="quick-orders"
+        >
+          <ClipboardList className="h-5 w-5 mr-3" />
+          View All Orders
         </Button>
         <Button 
           variant="outline" 
