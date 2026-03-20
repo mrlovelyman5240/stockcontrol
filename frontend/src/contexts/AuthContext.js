@@ -68,7 +68,8 @@ export const AuthProvider = ({ children }) => {
       
       return { success: true, user: userData };
     } catch (error) {
-      const message = error.response?.data?.detail || 'Login failed';
+      const detail = error.response?.data?.detail;
+      const message = typeof detail === 'string' ? detail : (Array.isArray(detail) && detail[0]?.msg) || 'Login failed';
       return { success: false, error: message };
     }
   };
@@ -83,7 +84,8 @@ export const AuthProvider = ({ children }) => {
       });
       return { success: true, user: response.data.user };
     } catch (error) {
-      const message = error.response?.data?.detail || 'Failed to create user';
+      const detail = error.response?.data?.detail;
+      const message = typeof detail === 'string' ? detail : (Array.isArray(detail) && detail[0]?.msg) || 'Failed to create user';
       return { success: false, error: message };
     }
   };

@@ -1,10 +1,8 @@
 /* eslint-disable no-restricted-globals */
 
-const CACHE_NAME = 'logiflow-v1';
+const CACHE_NAME = 'logiflow-v2';
 const urlsToCache = [
   '/',
-  '/index.html',
-  '/static/js/bundle.js',
   '/manifest.json'
 ];
 
@@ -12,51 +10,31 @@ const urlsToCache = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => {
-        console.log('Opened cache');
-        return cache.addAll(urlsToCache);
-      })
-      .catch((error) => {
-        console.log('Cache install failed:', error);
-      })
+      .then((cache) => cache.addAll(urlsToCache))
+      .catch((error) => console.log('Cache install failed:', error))
   );
   self.skipWaiting();
 });
 
-// Fetch event
+// Fetch event - Network first, fallback to cache
 self.addEventListener('fetch', (event) => {
+  // Skip non-GET requests
+  if (event.request.method !== 'GET') return;
+  // Skip API calls
+  if (event.request.url.includes('/api/')) return;
+
   event.respondWith(
-    caches.match(event.request)
+    fetch(event.request)
       .then((response) => {
-        // Return cached response if found
-        if (response) {
-          return response;
-        }
-        
-        // Clone the request
-        const fetchRequest = event.request.clone();
-        
-        return fetch(fetchRequest).then((response) => {
-          // Check if valid response
-          if (!response || response.status !== 200 || response.type !== 'basic') {
-            return response;
-          }
-          
-          // Clone the response
+        if (response && response.status === 200) {
           const responseToCache = response.clone();
-          
-          caches.open(CACHE_NAME)
-            .then((cache) => {
-              cache.put(event.request, responseToCache);
-            });
-          
-          return response;
-        });
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseToCache);
+          });
+        }
+        return response;
       })
-      .catch(() => {
-        // Return offline page if available
-        return caches.match('/');
-      })
+      .catch(() => caches.match(event.request).then((r) => r || caches.match('/')))
   );
 });
 

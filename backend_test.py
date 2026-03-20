@@ -4,7 +4,7 @@ from datetime import datetime
 import json
 
 class LogiFlowAPITester:
-    def __init__(self, base_url="https://driver-earnings-38.preview.emergentagent.com"):
+    def __init__(self, base_url="https://delivery-mgmt-14.preview.emergentagent.com"):
         self.base_url = base_url
         self.boss_token = None
         self.service_token = None

@@ -6,7 +6,7 @@ import { Badge } from '../../components/ui/badge';
 import { ScrollArea } from '../../components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { ordersApi } from '../../lib/api';
-import { formatCurrency, formatDateTime, getStatusColor, getStatusLabel, getOrderBorderColor } from '../../lib/utils';
+import { formatCurrency, formatDateTime, getStatusColor, getStatusLabel, getOrderBorderColor, getApiErrorMessage } from '../../lib/utils';
 import { toast } from 'sonner';
 import { 
   ClipboardList, 
@@ -48,7 +48,7 @@ const ServiceOrders = () => {
       toast.success('Order marked as Done! Amount added to financials.');
       fetchOrders();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to complete order');
+      toast.error(getApiErrorMessage(error, 'Failed to complete order'));
     } finally {
       setActionLoading(null);
     }

@@ -8,7 +8,7 @@ import { Badge } from '../../components/ui/badge';
 import { ScrollArea } from '../../components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { inventoryApi, ordersApi, usersApi } from '../../lib/api';
-import { formatCurrency } from '../../lib/utils';
+import { formatCurrency, getApiErrorMessage } from '../../lib/utils';
 import { toast } from 'sonner';
 import { 
   ShoppingCart, 
@@ -195,7 +195,7 @@ const NewOrder = () => {
       toast.success('Order created and assigned to driver!');
       navigate('/service');
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Failed to create order');
+      toast.error(getApiErrorMessage(error, 'Failed to create order'));
     } finally {
       setSubmitting(false);
     }

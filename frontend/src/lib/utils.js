@@ -68,6 +68,14 @@ export function getRoleLabel(role) {
   return labels[role] || role;
 }
 
+export function getApiErrorMessage(error, fallback = 'Something went wrong') {
+  const detail = error?.response?.data?.detail;
+  if (!detail) return fallback;
+  if (typeof detail === 'string') return detail;
+  if (Array.isArray(detail) && detail.length > 0) return detail[0]?.msg || fallback;
+  return fallback;
+}
+
 export function getOrderBorderColor(status) {
   const colors = {
     pending: 'border-l-amber-500',
