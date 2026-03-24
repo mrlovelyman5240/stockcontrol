@@ -8,6 +8,8 @@ import { Badge } from '../../components/ui/badge';
 import { ScrollArea } from '../../components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog';
+import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '../../components/ui/command';
 import { inventoryApi, ordersApi, usersApi } from '../../lib/api';
 import { formatCurrency, getApiErrorMessage } from '../../lib/utils';
 import { toast } from 'sonner';
@@ -26,7 +28,8 @@ import {
   ShoppingBag,
   MessageSquare,
   Layers,
-  ChevronRight
+  ChevronRight,
+  ChevronsUpDown
 } from 'lucide-react';
 
 const NewOrder = () => {
@@ -40,6 +43,7 @@ const NewOrder = () => {
   const [selectedDriver, setSelectedDriver] = useState('');
   const [orderType, setOrderType] = useState('delivery');
   const [freeGiftId, setFreeGiftId] = useState('');
+  const [giftPopoverOpen, setGiftPopoverOpen] = useState(false);
   const [cart, setCart] = useState([]);
 
   // Variant selection state
@@ -64,6 +68,30 @@ const NewOrder = () => {
       setLoading(false);
     }
   };
+
+  // Build flat list of gift options: products without variants + individual variants
+  const giftOptions = inventory
+    .filter(item => item.stock > 0)
+    .flatMap(item => {
+      if (item.variants?.length > 0) {
+        return item.variants.map(v => ({
+          key: `${item.id}:::${v.name}`,
+          item_id: item.id,
+          label: `${item.name} - ${v.name}`,
+          variant_name: v.name,
+          stock: item.stock,
+        }));
+      }
+      return [{
+        key: item.id,
+        item_id: item.id,
+        label: item.name,
+        variant_name: null,
+        stock: item.stock,
+      }];
+    });
+
+  const selectedGiftOption = giftOptions.find(g => g.key === freeGiftId);
 
   // Product click handler — opens variant dialog or adds directly
   const handleProductClick = (item) => {
@@ -163,18 +191,15 @@ const NewOrder = () => {
 
   const buildOrderItems = () => {
     const items = [...cart];
-    if (freeGiftId && freeGiftId !== 'none') {
-      const giftItem = inventory.find(i => i.id === freeGiftId);
-      if (giftItem) {
-        items.push({
-          item_id: giftItem.id,
-          name: giftItem.name,
-          price: 0,
-          quantity: 1,
-          variant_name: null,
-          is_free_gift: true
-        });
-      }
+    if (freeGiftId && freeGiftId !== 'none' && selectedGiftOption) {
+      items.push({
+        item_id: selectedGiftOption.item_id,
+        name: selectedGiftOption.label,
+        price: 0,
+        quantity: 1,
+        variant_name: selectedGiftOption.variant_name,
+        is_free_gift: true
+      });
     }
     return items;
   };
@@ -320,28 +345,63 @@ const NewOrder = () => {
             <Gift className="h-3 w-3" />
             Free Gift
           </Label>
-          <Select value={freeGiftId} onValueChange={setFreeGiftId}>
-            <SelectTrigger className="h-10" data-testid="free-gift-select">
-              <SelectValue placeholder="None" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">No free gift</SelectItem>
-              {inventory.filter(i => i.stock > 0).map((item) => (
-                <SelectItem key={item.id} value={item.id}>
-                  {item.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Popover open={giftPopoverOpen} onOpenChange={setGiftPopoverOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                role="combobox"
+                aria-expanded={giftPopoverOpen}
+                className="w-full h-10 justify-between font-normal text-left"
+                data-testid="free-gift-select"
+              >
+                <span className="truncate">
+                  {selectedGiftOption ? selectedGiftOption.label : 'None'}
+                </span>
+                <ChevronsUpDown className="ml-1 h-3 w-3 shrink-0 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[280px] p-0" align="start">
+              <Command>
+                <CommandInput placeholder="Search gift items..." data-testid="gift-search-input" />
+                <CommandList>
+                  <CommandEmpty>No items found.</CommandEmpty>
+                  <CommandGroup>
+                    <CommandItem
+                      value="none"
+                      onSelect={() => { setFreeGiftId(''); setGiftPopoverOpen(false); }}
+                      data-testid="gift-option-none"
+                    >
+                      <Check className={`mr-2 h-4 w-4 ${!freeGiftId || freeGiftId === 'none' ? 'opacity-100' : 'opacity-0'}`} />
+                      No free gift
+                    </CommandItem>
+                    {giftOptions.map((opt) => (
+                      <CommandItem
+                        key={opt.key}
+                        value={opt.label}
+                        onSelect={() => { setFreeGiftId(opt.key); setGiftPopoverOpen(false); }}
+                        data-testid={`gift-option-${opt.key}`}
+                      >
+                        <Check className={`mr-2 h-4 w-4 ${freeGiftId === opt.key ? 'opacity-100' : 'opacity-0'}`} />
+                        <div className="flex flex-col">
+                          <span className="text-sm">{opt.label}</span>
+                          <span className="text-xs text-muted-foreground">{opt.stock} in stock</span>
+                        </div>
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
         </div>
       </div>
 
       {/* Free gift indicator */}
-      {freeGiftId && freeGiftId !== 'none' && (
+      {selectedGiftOption && (
         <div className="mb-4 p-2 bg-primary/10 rounded-lg flex items-center justify-between text-sm">
           <span className="font-medium text-primary">
             <Gift className="h-3 w-3 inline mr-1" />
-            Free: {inventory.find(i => i.id === freeGiftId)?.name} — $0.00
+            Free: {selectedGiftOption.label} — $0.00
           </span>
           <Button variant="ghost" size="sm" onClick={() => setFreeGiftId('')} className="h-6 px-2 text-xs" data-testid="remove-free-gift">
             Remove
@@ -517,10 +577,10 @@ const NewOrder = () => {
               </div>
             </ScrollArea>
 
-            {freeGiftId && freeGiftId !== 'none' && (
+            {selectedGiftOption && (
               <div className="p-1.5 mb-2 rounded-lg bg-primary/10 flex items-center gap-2 text-xs">
                 <Gift className="h-3 w-3 text-primary" />
-                <span className="font-medium">Gift: {inventory.find(i => i.id === freeGiftId)?.name}</span>
+                <span className="font-medium">Gift: {selectedGiftOption.label}</span>
                 <span className="text-muted-foreground ml-auto">$0.00</span>
               </div>
             )}

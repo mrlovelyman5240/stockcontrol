@@ -20,7 +20,7 @@ Build a full-stack delivery management app with 3 role-based access levels: Boss
 
 ### Customer Service
 - Create orders via POS-style compact list with variant selection + editable price
-- Driver assignment (mandatory), Free Gift promo (manual), Order Type (Delivery/Pickup)
+- Driver assignment (mandatory), Free Gift promo (searchable, variant-level), Order Type (Delivery/Pickup)
 - Mark Done / Cancel buttons on pending orders
 - Inventory management with custom variants
 
@@ -34,8 +34,6 @@ Build a full-stack delivery management app with 3 role-based access levels: Boss
 - inventory: {id, name, price, stock, variants: [{name, price}], created_at, updated_at}
 - orders: {id, address, notes, items: [{item_id, name, price, quantity, variant_name, is_free_gift}], total, order_type, status, driver_id, driver_name, created_by, created_by_name, created_at, updated_at}
 - settings: {id, payment_method, hourly_rate, per_delivery_rate, per_pickup_rate, updated_at, updated_by}
-- payments: {id, driver_id, driver_name, amount, status, submitted_at, approved_at, approved_by}
-- audit_logs: {id, action, entity_type, entity_id, entity_name, performed_by, performed_by_name, details, timestamp}
 
 ## Test Credentials
 - Boss: boss / boss123
@@ -53,12 +51,10 @@ Build a full-stack delivery management app with 3 role-based access levels: Boss
 - [x] Order creation with POS-style compact list + variant selection popover + editable price
 - [x] Order Type: Delivery/Pickup toggle with colored badges on all views
 - [x] Cancel button (red) on pending orders, inventory restored on cancel
-- [x] Free Gift dropdown (manual promo, $0.00 line item)
+- [x] Free Gift: Searchable combobox showing "Product - Variant" format, $0.00 line item - Mar 24, 2026
 - [x] Unified "Customer Notes / Instructions" field for both order types
 - [x] Service worker (network-first strategy)
 - [x] Bug Fix: React crash on 422 error (getApiErrorMessage helper) - Mar 20, 2026
-- [x] Bug Fix: Orders tab visible in CS bottom nav - Mar 20, 2026
-- [x] Bug Fix: Driver dropdown working in New Order - Mar 20, 2026
 - [x] Custom Variants system: Backend schema + inventory UI + POS variant dialog - Mar 24, 2026
 - [x] Compact POS-style product list replacing card grid - Mar 24, 2026
 - [x] Editable price on variant/product selection - Mar 24, 2026
