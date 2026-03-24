@@ -1,11 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { ScrollArea } from '../../components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
-import { ordersApi, photosApi } from '../../lib/api';
-import { formatCurrency, formatDateTime, getStatusColor, getStatusLabel, getOrderBorderColor, getOrderTypeBadge } from '../../lib/utils';
+import { ordersApi } from '../../lib/api';
+import { formatCurrency, formatDateTime, getStatusColor, getStatusLabel, getOrderBorderColor, getOrderTypeBadge, getApiErrorMessage } from '../../lib/utils';
 import { toast } from 'sonner';
 import { 
   ClipboardList, 
@@ -18,36 +18,21 @@ import {
   Truck,
   ShoppingBag,
   XCircle,
-  Navigation,
-  Camera,
-  Image as ImageIcon,
-  Upload
+  Navigation
 } from 'lucide-react';
 
 const DriverOrders = () => {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
-  const [uploadingFor, setUploadingFor] = useState(null);
-  const [photoUrls, setPhotoUrls] = useState({});
-  const fileInputRef = useRef(null);
-  const [activeOrderId, setActiveOrderId] = useState(null);
+  const [actionLoading, setActionLoading] = useState(null);
 
-  useEffect(() => {
-    fetchOrders();
-  }, []);
+  useEffect(() => { fetchOrders(); }, []);
 
   const fetchOrders = async () => {
     try {
       const response = await ordersApi.getAll();
       setOrders(response.data);
-      // Load photos for completed orders
-      const completed = response.data.filter(o => o.proof_photo_id);
-      const photoMap = {};
-      for (const order of completed) {
-        photoMap[order.id] = photosApi.getUrl(order.proof_photo_id);
-      }
-      setPhotoUrls(photoMap);
     } catch (error) {
       toast.error('Failed to load orders');
     } finally {
@@ -65,32 +50,16 @@ const DriverOrders = () => {
     window.open(`https://www.google.com/maps/dir/?api=1&destination=${encodedAddress}`, '_blank');
   };
 
-  const handlePhotoUpload = (orderId) => {
-    setActiveOrderId(orderId);
-    fileInputRef.current?.click();
-  };
-
-  const onFileSelected = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file || !activeOrderId) return;
-
-    if (!file.type.startsWith('image/')) {
-      toast.error('Please select an image file');
-      return;
-    }
-
-    setUploadingFor(activeOrderId);
+  const handleMarkDone = async (orderId) => {
+    setActionLoading(orderId);
     try {
-      await ordersApi.uploadPhoto(activeOrderId, file);
-      toast.success('Delivery proof uploaded!');
+      await ordersApi.complete(orderId);
+      toast.success('Order marked as Done!');
       fetchOrders();
     } catch (error) {
-      const msg = error.response?.data?.detail;
-      toast.error(typeof msg === 'string' ? msg : 'Upload failed');
+      toast.error(getApiErrorMessage(error, 'Failed to complete order'));
     } finally {
-      setUploadingFor(null);
-      setActiveOrderId(null);
-      e.target.value = '';
+      setActionLoading(null);
     }
   };
 
@@ -118,16 +87,6 @@ const DriverOrders = () => {
 
   return (
     <div className="p-4 max-w-2xl mx-auto" data-testid="driver-orders">
-      <input
-        type="file"
-        ref={fileInputRef}
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={onFileSelected}
-        data-testid="photo-file-input"
-      />
-
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
@@ -211,13 +170,9 @@ const DriverOrders = () => {
                     ))}
                   </div>
 
-                  {/* Action buttons for pending orders */}
+                  {/* Pending: Navigate + Mark Done */}
                   {order.status === 'pending' && (
                     <div className="space-y-2">
-                      <div className="flex items-center justify-center gap-2 text-amber-600 py-2 bg-amber-50 dark:bg-amber-900/20 rounded-lg">
-                        <Clock className="h-5 w-5" />
-                        <span className="font-medium">Pending - Deliver to customer</span>
-                      </div>
                       {order.order_type === 'delivery' && (
                         <Button
                           variant="outline"
@@ -229,47 +184,28 @@ const DriverOrders = () => {
                           Navigate with Google Maps
                         </Button>
                       )}
+                      <Button
+                        className="w-full gap-2"
+                        onClick={() => handleMarkDone(order.id)}
+                        disabled={actionLoading === order.id}
+                        data-testid={`complete-order-${order.id}`}
+                      >
+                        {actionLoading === order.id ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <>
+                            <CheckCircle className="h-4 w-4" />
+                            Mark as Done
+                          </>
+                        )}
+                      </Button>
                     </div>
                   )}
 
-                  {/* Completed status + photo upload */}
                   {order.status === 'completed' && (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-center gap-2 text-primary py-2">
-                        <CheckCircle className="h-5 w-5" />
-                        <span className="font-medium">Completed</span>
-                      </div>
-                      
-                      {/* Photo section */}
-                      {order.proof_photo_id ? (
-                        <div className="relative rounded-lg overflow-hidden border" data-testid={`proof-photo-${order.id}`}>
-                          <img
-                            src={photoUrls[order.id]}
-                            alt="Delivery proof"
-                            className="w-full h-40 object-cover"
-                            onError={(e) => { e.target.style.display = 'none'; }}
-                          />
-                          <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs p-1.5 flex items-center gap-1">
-                            <ImageIcon className="h-3 w-3" /> Delivery Proof
-                          </div>
-                        </div>
-                      ) : (
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="w-full gap-2"
-                          onClick={() => handlePhotoUpload(order.id)}
-                          disabled={uploadingFor === order.id}
-                          data-testid={`upload-photo-btn-${order.id}`}
-                        >
-                          {uploadingFor === order.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <Camera className="h-4 w-4" />
-                          )}
-                          {uploadingFor === order.id ? 'Uploading...' : 'Upload Delivery Proof'}
-                        </Button>
-                      )}
+                    <div className="flex items-center justify-center gap-2 text-primary py-2">
+                      <CheckCircle className="h-5 w-5" />
+                      <span className="font-medium">Completed</span>
                     </div>
                   )}
 
@@ -280,7 +216,6 @@ const DriverOrders = () => {
                     </div>
                   )}
 
-                  {/* Timestamp */}
                   <p className="text-xs text-muted-foreground mt-3 text-center">
                     {formatDateTime(order.created_at)}
                   </p>

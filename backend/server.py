@@ -1,6 +1,5 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, UploadFile, File, Query, Header
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi.responses import Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -13,7 +12,6 @@ import uuid
 from datetime import datetime, timezone, timedelta
 import jwt
 import bcrypt
-import requests
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -27,40 +25,6 @@ db = client[os.environ['DB_NAME']]
 JWT_SECRET = os.environ.get('JWT_SECRET', 'logiflow-secret-key-2024')
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = 24
-
-# Object Storage Configuration
-STORAGE_URL = "https://integrations.emergentagent.com/objstore/api/v1/storage"
-EMERGENT_KEY = os.environ.get("EMERGENT_LLM_KEY")
-APP_NAME = "logiflow-pro"
-storage_key = None
-
-def init_storage():
-    global storage_key
-    if storage_key:
-        return storage_key
-    resp = requests.post(f"{STORAGE_URL}/init", json={"emergent_key": EMERGENT_KEY}, timeout=30)
-    resp.raise_for_status()
-    storage_key = resp.json()["storage_key"]
-    return storage_key
-
-def put_object(path: str, data: bytes, content_type: str) -> dict:
-    key = init_storage()
-    resp = requests.put(
-        f"{STORAGE_URL}/objects/{path}",
-        headers={"X-Storage-Key": key, "Content-Type": content_type},
-        data=data, timeout=120
-    )
-    resp.raise_for_status()
-    return resp.json()
-
-def get_object(path: str) -> tuple:
-    key = init_storage()
-    resp = requests.get(
-        f"{STORAGE_URL}/objects/{path}",
-        headers={"X-Storage-Key": key}, timeout=60
-    )
-    resp.raise_for_status()
-    return resp.content, resp.headers.get("Content-Type", "application/octet-stream")
 
 # Create the main app
 app = FastAPI(title="LogiFlow Pro API")
@@ -149,8 +113,6 @@ class Order(BaseModel):
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     delivered_at: Optional[str] = None
-    proof_photo_id: Optional[str] = None
-    proof_photo_path: Optional[str] = None
 
 class OrderCreate(BaseModel):
     address: str  # Customer notes / instructions
@@ -508,15 +470,19 @@ async def update_order(order_id: str, update: OrderUpdate, user = Depends(get_cu
     updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
     return Order(**updated)
 
-# Endpoint for Customer Service to mark order as Done
+# Endpoint for Boss/CS/Driver to mark order as Done
 @api_router.put("/orders/{order_id}/complete", response_model=Order)
-async def complete_order(order_id: str, user = Depends(require_role(["boss", "customer_service"]))):
+async def complete_order(order_id: str, user = Depends(require_role(["boss", "customer_service", "driver"]))):
     existing = await db.orders.find_one({"id": order_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Order not found")
     
     if existing["status"] != "pending":
         raise HTTPException(status_code=400, detail="Order is not in pending status")
+    
+    # Drivers can only complete their own orders
+    if user["role"] == "driver" and existing.get("driver_id") != user["user_id"]:
+        raise HTTPException(status_code=403, detail="You can only complete your own orders")
     
     await db.orders.update_one(
         {"id": order_id},
@@ -800,8 +766,12 @@ async def get_financial_ledger(
                 "timestamp": ts,
                 "details": {"items_count": len(o.get("items", [])), "order_type": o.get("order_type", "delivery")}
             }
-            if search and search.lower() not in entry["description"].lower() and search.lower() not in entry["driver_name"].lower():
-                continue
+            if search:
+                search_lower = search.lower()
+                desc_match = search_lower in entry["description"].lower()
+                driver_match = entry["driver_name"] and search_lower in entry["driver_name"].lower()
+                if not desc_match and not driver_match:
+                    continue
             ledger.append(entry)
     
     # Get deposits (payments)
@@ -827,8 +797,12 @@ async def get_financial_ledger(
                 "timestamp": ts,
                 "details": {"approved_by": p.get("approved_by", "")}
             }
-            if search and search.lower() not in entry["description"].lower() and search.lower() not in entry["driver_name"].lower():
-                continue
+            if search:
+                search_lower = search.lower()
+                desc_match = search_lower in entry["description"].lower()
+                driver_match = entry["driver_name"] and search_lower in entry["driver_name"].lower()
+                if not desc_match and not driver_match:
+                    continue
             ledger.append(entry)
     
     # Get hours logged
@@ -854,8 +828,12 @@ async def get_financial_ledger(
                 "timestamp": ts,
                 "details": {"logged_by": h.get("logged_by", ""), "date": h["date"]}
             }
-            if search and search.lower() not in entry["description"].lower() and search.lower() not in entry["driver_name"].lower():
-                continue
+            if search:
+                search_lower = search.lower()
+                desc_match = search_lower in entry["description"].lower()
+                driver_match = entry["driver_name"] and search_lower in entry["driver_name"].lower()
+                if not desc_match and not driver_match:
+                    continue
             ledger.append(entry)
     
     # Sort by timestamp descending
@@ -1057,79 +1035,6 @@ async def get_driver_stats(date: Optional[str] = None, user = Depends(require_ro
         "today_revenue": sum(o["total"] for o in today_completed)
     }
 
-# ============== PHOTO UPLOAD ROUTES ==============
-
-@api_router.post("/orders/{order_id}/photo")
-async def upload_delivery_photo(order_id: str, file: UploadFile = File(...), user = Depends(get_current_user)):
-    order = await db.orders.find_one({"id": order_id}, {"_id": 0})
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
-    
-    ext = file.filename.split(".")[-1].lower() if "." in file.filename else "jpg"
-    if ext not in ["jpg", "jpeg", "png", "webp", "gif"]:
-        raise HTTPException(status_code=400, detail="Only image files are allowed")
-    
-    storage_path = f"{APP_NAME}/delivery-photos/{order_id}/{uuid.uuid4()}.{ext}"
-    data = await file.read()
-    
-    try:
-        result = put_object(storage_path, data, file.content_type or "image/jpeg")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
-    
-    photo_record = {
-        "id": str(uuid.uuid4()),
-        "order_id": order_id,
-        "storage_path": result["path"],
-        "original_filename": file.filename,
-        "content_type": file.content_type or "image/jpeg",
-        "size": result.get("size", len(data)),
-        "uploaded_by": user["user_id"],
-        "uploaded_by_name": user["username"],
-        "created_at": datetime.now(timezone.utc).isoformat()
-    }
-    await db.delivery_photos.insert_one(photo_record)
-    
-    await db.orders.update_one(
-        {"id": order_id},
-        {"$set": {"proof_photo_id": photo_record["id"], "proof_photo_path": result["path"]}}
-    )
-    
-    return {"id": photo_record["id"], "storage_path": result["path"], "message": "Photo uploaded"}
-
-@api_router.get("/photos/{photo_id}")
-async def get_delivery_photo(photo_id: str, auth: Optional[str] = Query(None), authorization: Optional[str] = Header(None)):
-    # Support both header and query param auth
-    token = None
-    if authorization and authorization.startswith("Bearer "):
-        token = authorization.split(" ")[1]
-    elif auth:
-        token = auth
-    
-    if not token:
-        raise HTTPException(status_code=401, detail="Authentication required")
-    
-    try:
-        jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    
-    record = await db.delivery_photos.find_one({"id": photo_id}, {"_id": 0})
-    if not record:
-        raise HTTPException(status_code=404, detail="Photo not found")
-    
-    try:
-        data, content_type = get_object(record["storage_path"])
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to retrieve photo: {str(e)}")
-    
-    return Response(content=data, media_type=record.get("content_type", content_type))
-
-@api_router.get("/orders/{order_id}/photos")
-async def get_order_photos(order_id: str, user = Depends(get_current_user)):
-    photos = await db.delivery_photos.find({"order_id": order_id}, {"_id": 0}).to_list(100)
-    return [{"id": p["id"], "original_filename": p["original_filename"], "uploaded_by_name": p.get("uploaded_by_name", ""), "created_at": p["created_at"]} for p in photos]
-
 # ============== SEED DATA ROUTE ==============
 
 @api_router.post("/seed")
@@ -1212,11 +1117,3 @@ logger = logging.getLogger(__name__)
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
-
-@app.on_event("startup")
-async def startup_event():
-    try:
-        init_storage()
-        logger.info("Object storage initialized successfully")
-    except Exception as e:
-        logger.warning(f"Object storage init deferred: {e}")

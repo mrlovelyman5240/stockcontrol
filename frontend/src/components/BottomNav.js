@@ -29,7 +29,7 @@ const BottomNav = () => {
           { icon: ClipboardList, label: 'Orders', path: '/boss/orders' },
           { icon: Package, label: 'Inventory', path: '/boss/inventory' },
           { icon: Clock, label: 'Staff', path: '/boss/staff' },
-          { icon: BookOpen, label: 'Ledger', path: '/boss/ledger' },
+          { icon: BookOpen, label: 'Finance', path: '/boss/ledger' },
           { icon: Settings, label: 'Settings', path: '/boss/settings' },
         ];
       case 'customer_service':

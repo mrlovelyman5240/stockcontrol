@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Badge } from '../../components/ui/badge';
 import { ScrollArea } from '../../components/ui/scroll-area';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../components/ui/tabs';
-import { statsApi, paymentsApi } from '../../lib/api';
-import { formatCurrency, formatDateTime } from '../../lib/utils';
+import { statsApi } from '../../lib/api';
+import { formatCurrency } from '../../lib/utils';
 import { toast } from 'sonner';
 import { useTheme } from '../../contexts/ThemeContext';
 import { 
@@ -15,22 +15,22 @@ import {
   Users, 
   Wallet,
   CheckCircle,
-  XCircle,
   Clock,
   Loader2,
   RefreshCw,
   Moon,
   Sun,
   LogOut,
-  Package
+  Package,
+  ChevronRight
 } from 'lucide-react';
 
 const BossDashboard = () => {
   const { user, logout } = useAuth();
   const { resolvedTheme, toggleTheme } = useTheme();
+  const navigate = useNavigate();
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [actionLoading, setActionLoading] = useState(null);
 
   const fetchStats = async () => {
     try {
@@ -43,34 +43,10 @@ const BossDashboard = () => {
     }
   };
 
-  useEffect(() => {
-    fetchStats();
-  }, []);
+  useEffect(() => { fetchStats(); }, []);
 
-  const handleApprovePayment = async (paymentId) => {
-    setActionLoading(paymentId);
-    try {
-      await paymentsApi.approve(paymentId);
-      toast.success('Payment approved');
-      fetchStats();
-    } catch (error) {
-      toast.error('Failed to approve payment');
-    } finally {
-      setActionLoading(null);
-    }
-  };
-
-  const handleRejectPayment = async (paymentId) => {
-    setActionLoading(paymentId);
-    try {
-      await paymentsApi.reject(paymentId);
-      toast.success('Payment rejected');
-      fetchStats();
-    } catch (error) {
-      toast.error('Failed to reject payment');
-    } finally {
-      setActionLoading(null);
-    }
+  const handleDriverClick = (driverId) => {
+    navigate(`/boss/ledger?driver_id=${driverId}&tab=history`);
   };
 
   if (loading) {
@@ -81,8 +57,10 @@ const BossDashboard = () => {
     );
   }
 
+  const pendingPaymentsCount = stats?.pending_payments?.length || 0;
+
   return (
-    <div className="p-4 max-w-2xl mx-auto" data-testid="boss-dashboard">
+    <div className="p-4 max-w-2xl mx-auto pb-24" data-testid="boss-dashboard">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -118,7 +96,6 @@ const BossDashboard = () => {
 
       {/* Financial Stats Grid */}
       <div className="grid grid-cols-2 gap-4 mb-6">
-        {/* Pending Revenue (Out on Delivery) */}
         <Card className="bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800" data-testid="pending-revenue-card">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 mb-2">
@@ -134,7 +111,6 @@ const BossDashboard = () => {
           </CardContent>
         </Card>
 
-        {/* Total Revenue (Finalized) */}
         <Card className="bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800" data-testid="total-revenue-card">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 text-emerald-700 dark:text-emerald-400 mb-2">
@@ -150,7 +126,6 @@ const BossDashboard = () => {
           </CardContent>
         </Card>
 
-        {/* Staff Payments */}
         <Card data-testid="staff-payments-card">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 text-muted-foreground mb-2">
@@ -164,7 +139,6 @@ const BossDashboard = () => {
           </CardContent>
         </Card>
 
-        {/* Total Orders */}
         <Card data-testid="total-orders-card">
           <CardContent className="p-4">
             <div className="flex items-center gap-2 text-muted-foreground mb-2">
@@ -179,149 +153,78 @@ const BossDashboard = () => {
         </Card>
       </div>
 
-      {/* Tabs */}
-      <Tabs defaultValue="collections" className="w-full">
-        <TabsList className="grid w-full grid-cols-2 mb-4">
-          <TabsTrigger value="collections" data-testid="collections-tab">
-            Collections
-            {stats?.pending_collections?.length > 0 && (
-              <Badge variant="secondary" className="ml-2">
-                {stats.pending_collections.length}
+      {/* Pending Deposits Banner */}
+      {pendingPaymentsCount > 0 && (
+        <Card
+          className="mb-6 border-amber-300 dark:border-amber-700 bg-amber-50/50 dark:bg-amber-950/20 cursor-pointer hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors"
+          onClick={() => navigate('/boss/ledger?tab=deposits')}
+          data-testid="pending-deposits-banner"
+        >
+          <CardContent className="p-4 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-full bg-amber-100 dark:bg-amber-900/40 flex items-center justify-center">
+                <Wallet className="h-5 w-5 text-amber-600 dark:text-amber-400" />
+              </div>
+              <div>
+                <p className="font-semibold text-sm">Pending Deposits</p>
+                <p className="text-xs text-muted-foreground">{pendingPaymentsCount} awaiting approval</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge className="bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-400">
+                {pendingPaymentsCount}
               </Badge>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="payments" data-testid="payments-tab">
-            Payments
-            {stats?.pending_payments?.length > 0 && (
-              <Badge variant="secondary" className="ml-2">
-                {stats.pending_payments.length}
-              </Badge>
-            )}
-          </TabsTrigger>
-        </TabsList>
+              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
-        {/* Pending Collections */}
-        <TabsContent value="collections">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Wallet className="h-5 w-5" />
-                Driver Holdings (from completed orders)
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {stats?.pending_collections?.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <CheckCircle className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                  <p>All collections up to date!</p>
-                </div>
-              ) : (
-                <ScrollArea className="max-h-[300px]">
-                  <div className="space-y-3">
-                    {stats?.pending_collections?.map((item) => (
-                      <div
-                        key={item.driver_id}
-                        className="flex items-center justify-between p-4 bg-muted/50 rounded-xl"
-                        data-testid={`collection-${item.driver_id}`}
-                      >
-                        <div>
-                          <p className="font-semibold">{item.driver_name}</p>
-                          <p className="text-sm text-muted-foreground">
-                            Sales: {formatCurrency(item.total_sales)} | Earnings: {formatCurrency(item.driver_earnings)}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-bold text-lg text-accent">
-                            {formatCurrency(item.amount)}
-                          </p>
-                          <p className="text-xs text-muted-foreground">Holding</p>
-                        </div>
-                      </div>
-                    ))}
+      {/* Driver Holdings */}
+      <Card data-testid="driver-holdings-card">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Wallet className="h-5 w-5" />
+            Driver Holdings
+            <span className="text-xs text-muted-foreground font-normal ml-auto">from completed orders</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {stats?.pending_collections?.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <CheckCircle className="h-12 w-12 mx-auto mb-3 opacity-50" />
+              <p>All collections up to date!</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {stats?.pending_collections?.map((item) => (
+                <div
+                  key={item.driver_id}
+                  className="flex items-center justify-between p-4 bg-muted/50 rounded-xl cursor-pointer hover:bg-muted/80 transition-colors group"
+                  onClick={() => handleDriverClick(item.driver_id)}
+                  data-testid={`collection-${item.driver_id}`}
+                >
+                  <div>
+                    <p className="font-semibold">{item.driver_name}</p>
+                    <p className="text-sm text-muted-foreground">
+                      Sales: {formatCurrency(item.total_sales)} · Earnings: {formatCurrency(item.driver_earnings)}
+                    </p>
                   </div>
-                </ScrollArea>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Payment Requests */}
-        <TabsContent value="payments">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-lg flex items-center gap-2">
-                <Clock className="h-5 w-5" />
-                Payment Requests
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {stats?.pending_payments?.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <CheckCircle className="h-12 w-12 mx-auto mb-3 opacity-50" />
-                  <p>No pending payment requests</p>
-                </div>
-              ) : (
-                <ScrollArea className="max-h-[300px]">
-                  <div className="space-y-3">
-                    {stats?.pending_payments?.map((payment) => (
-                      <div
-                        key={payment.id}
-                        className="p-4 bg-muted/50 rounded-xl"
-                        data-testid={`payment-${payment.id}`}
-                      >
-                        <div className="flex items-center justify-between mb-3">
-                          <div>
-                            <p className="font-semibold">{payment.driver_name}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {formatDateTime(payment.submitted_at)}
-                            </p>
-                          </div>
-                          <p className="font-bold text-xl">{formatCurrency(payment.amount)}</p>
-                        </div>
-                        <div className="flex gap-2">
-                          <Button
-                            size="sm"
-                            className="flex-1"
-                            onClick={() => handleApprovePayment(payment.id)}
-                            disabled={actionLoading === payment.id}
-                            data-testid={`approve-payment-${payment.id}`}
-                          >
-                            {actionLoading === payment.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <>
-                                <CheckCircle className="h-4 w-4 mr-1" />
-                                Approve
-                              </>
-                            )}
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            className="flex-1"
-                            onClick={() => handleRejectPayment(payment.id)}
-                            disabled={actionLoading === payment.id}
-                            data-testid={`reject-payment-${payment.id}`}
-                          >
-                            {actionLoading === payment.id ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <>
-                                <XCircle className="h-4 w-4 mr-1" />
-                                Reject
-                              </>
-                            )}
-                          </Button>
-                        </div>
-                      </div>
-                    ))}
+                  <div className="flex items-center gap-2">
+                    <div className="text-right">
+                      <p className="font-bold text-lg text-accent">
+                        {formatCurrency(item.amount)}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Holding</p>
+                    </div>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
                   </div>
-                </ScrollArea>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 };
