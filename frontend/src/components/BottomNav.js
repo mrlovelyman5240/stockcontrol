@@ -8,7 +8,9 @@ import {
   Wallet,
   ClipboardList,
   Settings,
-  FileText
+  FileText,
+  Clock,
+  BookOpen
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 
@@ -26,7 +28,8 @@ const BottomNav = () => {
           { icon: LayoutDashboard, label: 'Dashboard', path: '/boss' },
           { icon: ClipboardList, label: 'Orders', path: '/boss/orders' },
           { icon: Package, label: 'Inventory', path: '/boss/inventory' },
-          { icon: FileText, label: 'Audit', path: '/boss/audit-log' },
+          { icon: Clock, label: 'Staff', path: '/boss/staff' },
+          { icon: BookOpen, label: 'Ledger', path: '/boss/ledger' },
           { icon: Settings, label: 'Settings', path: '/boss/settings' },
         ];
       case 'customer_service':
@@ -35,6 +38,7 @@ const BottomNav = () => {
           { icon: ShoppingCart, label: 'New Order', path: '/service/new-order' },
           { icon: ClipboardList, label: 'Orders', path: '/service/orders' },
           { icon: Package, label: 'Inventory', path: '/service/inventory' },
+          { icon: Clock, label: 'Staff', path: '/service/staff' },
         ];
       case 'driver':
         return [

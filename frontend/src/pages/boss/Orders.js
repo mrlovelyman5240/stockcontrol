@@ -5,7 +5,7 @@ import { Input } from '../../components/ui/input';
 import { Badge } from '../../components/ui/badge';
 import { ScrollArea } from '../../components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
-import { ordersApi, usersApi } from '../../lib/api';
+import { ordersApi, usersApi, photosApi } from '../../lib/api';
 import { formatCurrency, formatDateTime, getStatusColor, getStatusLabel, getOrderBorderColor, getOrderTypeBadge } from '../../lib/utils';
 import { toast } from 'sonner';
 import { 
@@ -17,7 +17,8 @@ import {
   RefreshCw,
   Truck,
   CheckCircle,
-  ShoppingBag
+  ShoppingBag,
+  Image as ImageIcon
 } from 'lucide-react';
 
 const BossOrders = () => {
@@ -26,6 +27,7 @@ const BossOrders = () => {
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [actionLoading, setActionLoading] = useState(null);
+  const [expandedPhoto, setExpandedPhoto] = useState(null);
 
   useEffect(() => {
     fetchData();
@@ -194,6 +196,24 @@ const BossOrders = () => {
                   <p className="text-xs text-muted-foreground mt-3">
                     Created: {formatDateTime(order.created_at)} by {order.created_by_name}
                   </p>
+
+                  {/* Delivery Proof Photo */}
+                  {order.proof_photo_id && (
+                    <div className="mt-2">
+                      {expandedPhoto === order.id ? (
+                        <div className="relative rounded-lg overflow-hidden border cursor-pointer" onClick={() => setExpandedPhoto(null)} data-testid={`proof-photo-${order.id}`}>
+                          <img src={photosApi.getUrl(order.proof_photo_id)} alt="Delivery proof" className="w-full h-48 object-cover" onError={(e) => { e.target.style.display = 'none'; }} />
+                          <div className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-xs p-1.5 flex items-center gap-1">
+                            <ImageIcon className="h-3 w-3" /> Delivery Proof (tap to close)
+                          </div>
+                        </div>
+                      ) : (
+                        <Button variant="outline" size="sm" className="gap-1 text-xs" onClick={() => setExpandedPhoto(order.id)} data-testid={`view-proof-btn-${order.id}`}>
+                          <ImageIcon className="h-3 w-3" /> View Delivery Proof
+                        </Button>
+                      )}
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             ))

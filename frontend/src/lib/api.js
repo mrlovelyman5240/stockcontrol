@@ -50,6 +50,20 @@ export const ordersApi = {
   complete: (id) => api.put(`/orders/${id}/complete`),
   cancel: (id) => api.put(`/orders/${id}/cancel`),
   delete: (id) => api.delete(`/orders/${id}`),
+  uploadPhoto: (id, file) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post(`/orders/${id}/photo`, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+  },
+  getPhotos: (id) => api.get(`/orders/${id}/photos`),
+};
+
+export const photosApi = {
+  getUrl: (photoId) => {
+    const token = localStorage.getItem('token');
+    return `${API_URL}/api/photos/${photoId}?auth=${token}`;
+  },
+  getBlob: (photoId) => api.get(`/photos/${photoId}`, { responseType: 'blob' }),
 };
 
 export const paymentsApi = {
