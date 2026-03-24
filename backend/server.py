@@ -59,13 +59,18 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     user: UserResponse
 
+class ItemVariant(BaseModel):
+    name: str  # e.g., "Small", "Large", "Family Size"
+    price: float
+
 class InventoryItem(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
-    price: float
+    price: float  # Default/base price (first variant price or standalone)
     stock: int
-    bogo_enabled: bool = False  # Buy 1 Get 1 Free
+    variants: List[ItemVariant] = []  # Empty = single-price item
+    bogo_enabled: bool = False
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -73,12 +78,14 @@ class InventoryCreate(BaseModel):
     name: str
     price: float
     stock: int
+    variants: List[ItemVariant] = []
     bogo_enabled: bool = False
 
 class InventoryUpdate(BaseModel):
     name: Optional[str] = None
     price: Optional[float] = None
     stock: Optional[int] = None
+    variants: Optional[List[ItemVariant]] = None
     bogo_enabled: Optional[bool] = None
 
 class OrderItem(BaseModel):
@@ -86,12 +93,14 @@ class OrderItem(BaseModel):
     name: str
     price: float
     quantity: int
+    variant_name: Optional[str] = None  # Which variant was selected
     is_free_gift: bool = False
 
 class Order(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    address: str
+    address: str  # Also used as customer notes/instructions
+    notes: Optional[str] = None  # Unified customer notes
     items: List[OrderItem]
     total: float
     order_type: str = "delivery"  # delivery or pickup
@@ -105,7 +114,7 @@ class Order(BaseModel):
     delivered_at: Optional[str] = None
 
 class OrderCreate(BaseModel):
-    address: str
+    address: str  # Customer notes / instructions
     items: List[OrderItem]
     total: float
     order_type: str = "delivery"  # delivery or pickup
@@ -301,7 +310,10 @@ async def update_inventory_item(item_id: str, update: InventoryUpdate, user = De
     if not existing:
         raise HTTPException(status_code=404, detail="Item not found")
     
-    update_data = {k: v for k, v in update.model_dump().items() if v is not None}
+    update_data = {}
+    for k, v in update.model_dump().items():
+        if v is not None:
+            update_data[k] = v
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
     
     await db.inventory.update_one({"id": item_id}, {"$set": update_data})
@@ -872,15 +884,29 @@ async def seed_data():
     ]
     await db.users.insert_many(users)
     
-    # Create inventory
+    # Create inventory with variants
     inventory = [
-        InventoryItem(name="Premium Pizza", price=15.99, stock=50, bogo_enabled=True).model_dump(),
-        InventoryItem(name="Classic Burger", price=9.99, stock=100).model_dump(),
+        InventoryItem(name="Premium Pizza", price=12.99, stock=50, variants=[
+            ItemVariant(name="Small", price=12.99),
+            ItemVariant(name="Medium", price=15.99),
+            ItemVariant(name="Large", price=19.99),
+        ]).model_dump(),
+        InventoryItem(name="Classic Burger", price=9.99, stock=100, variants=[
+            ItemVariant(name="Single", price=9.99),
+            ItemVariant(name="Double", price=14.99),
+        ]).model_dump(),
         InventoryItem(name="Caesar Salad", price=7.99, stock=30).model_dump(),
-        InventoryItem(name="Chicken Wings", price=12.99, stock=45, bogo_enabled=True).model_dump(),
+        InventoryItem(name="Chicken Wings", price=10.99, stock=45, variants=[
+            ItemVariant(name="6 pcs", price=10.99),
+            ItemVariant(name="12 pcs", price=18.99),
+            ItemVariant(name="24 pcs", price=32.99),
+        ]).model_dump(),
         InventoryItem(name="Pasta Carbonara", price=14.99, stock=25).model_dump(),
         InventoryItem(name="Fish & Chips", price=11.99, stock=40).model_dump(),
-        InventoryItem(name="Grilled Steak", price=24.99, stock=20).model_dump(),
+        InventoryItem(name="Grilled Steak", price=24.99, stock=20, variants=[
+            ItemVariant(name="Regular", price=24.99),
+            ItemVariant(name="Premium Cut", price=34.99),
+        ]).model_dump(),
         InventoryItem(name="Veggie Wrap", price=8.99, stock=35).model_dump(),
     ]
     await db.inventory.insert_many(inventory)

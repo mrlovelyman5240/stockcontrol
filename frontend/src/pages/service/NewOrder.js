@@ -7,6 +7,7 @@ import { Label } from '../../components/ui/label';
 import { Badge } from '../../components/ui/badge';
 import { ScrollArea } from '../../components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog';
 import { inventoryApi, ordersApi, usersApi } from '../../lib/api';
 import { formatCurrency, getApiErrorMessage } from '../../lib/utils';
 import { toast } from 'sonner';
@@ -15,8 +16,6 @@ import {
   Plus, 
   Minus,
   Trash2,
-  MapPin,
-  Package,
   Gift,
   AlertTriangle,
   Loader2,
@@ -24,7 +23,10 @@ import {
   Search,
   Truck,
   User,
-  ShoppingBag
+  ShoppingBag,
+  MessageSquare,
+  Layers,
+  ChevronRight
 } from 'lucide-react';
 
 const NewOrder = () => {
@@ -34,15 +36,19 @@ const NewOrder = () => {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [search, setSearch] = useState('');
-  const [address, setAddress] = useState('');
+  const [notes, setNotes] = useState('');
   const [selectedDriver, setSelectedDriver] = useState('');
   const [orderType, setOrderType] = useState('delivery');
   const [freeGiftId, setFreeGiftId] = useState('');
   const [cart, setCart] = useState([]);
 
-  useEffect(() => {
-    fetchData();
-  }, []);
+  // Variant selection state
+  const [variantDialogOpen, setVariantDialogOpen] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [selectedVariant, setSelectedVariant] = useState(null);
+  const [customPrice, setCustomPrice] = useState('');
+
+  useEffect(() => { fetchData(); }, []);
 
   const fetchData = async () => {
     try {
@@ -59,57 +65,90 @@ const NewOrder = () => {
     }
   };
 
-  const addToCart = (item) => {
+  // Product click handler — opens variant dialog or adds directly
+  const handleProductClick = (item) => {
     if (item.stock <= 0) {
       toast.error('Item is out of stock');
       return;
     }
 
-    const existingIndex = cart.findIndex(c => c.item_id === item.id && !c.is_free_gift);
-    
+    if (item.variants?.length > 0) {
+      setSelectedProduct(item);
+      setSelectedVariant(null);
+      setCustomPrice('');
+      setVariantDialogOpen(true);
+    } else {
+      // No variants → add directly with base price (open dialog for editable price)
+      setSelectedProduct(item);
+      setSelectedVariant(null);
+      setCustomPrice(item.price.toString());
+      setVariantDialogOpen(true);
+    }
+  };
+
+  const handleVariantSelect = (variant) => {
+    setSelectedVariant(variant);
+    setCustomPrice(variant.price.toString());
+  };
+
+  const handleAddToCartFromDialog = () => {
+    if (!selectedProduct) return;
+    const price = parseFloat(customPrice);
+    if (isNaN(price) || price < 0) {
+      toast.error('Please enter a valid price');
+      return;
+    }
+
+    const variantName = selectedVariant?.name || null;
+    const cartKey = `${selectedProduct.id}-${variantName || 'base'}-${price}`;
+    const existingIndex = cart.findIndex(c => 
+      c.item_id === selectedProduct.id && 
+      c.variant_name === variantName && 
+      c.price === price &&
+      !c.is_free_gift
+    );
+
     if (existingIndex >= 0) {
       const newCart = [...cart];
-      const currentQty = newCart[existingIndex].quantity;
-      
-      if (currentQty >= item.stock) {
+      if (newCart[existingIndex].quantity >= selectedProduct.stock) {
         toast.error('Not enough stock');
         return;
       }
-      
       newCart[existingIndex].quantity += 1;
       setCart(newCart);
     } else {
+      const displayName = variantName 
+        ? `${selectedProduct.name} (${variantName})`
+        : selectedProduct.name;
       setCart([...cart, {
-        item_id: item.id,
-        name: item.name,
-        price: item.price,
+        item_id: selectedProduct.id,
+        name: displayName,
+        price,
         quantity: 1,
+        variant_name: variantName,
         is_free_gift: false
       }]);
     }
-    
-    toast.success(`Added ${item.name} to cart`);
+
+    toast.success(`Added to cart`);
+    setVariantDialogOpen(false);
+    setSelectedProduct(null);
   };
 
   const updateQuantity = (index, delta) => {
     const newCart = [...cart];
     const item = newCart[index];
-    const inventoryItem = inventory.find(i => i.id === item.item_id);
-    
     if (item.is_free_gift) return;
-    
+    const inventoryItem = inventory.find(i => i.id === item.item_id);
     const newQty = item.quantity + delta;
-    
     if (newQty <= 0) {
       setCart(cart.filter((_, i) => i !== index));
       return;
     }
-    
     if (inventoryItem && newQty > inventoryItem.stock) {
       toast.error('Not enough stock');
       return;
     }
-    
     newCart[index].quantity = newQty;
     setCart(newCart);
   };
@@ -122,7 +161,6 @@ const NewOrder = () => {
     return cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
   };
 
-  // Build final items list including free gift
   const buildOrderItems = () => {
     const items = [...cart];
     if (freeGiftId && freeGiftId !== 'none') {
@@ -133,6 +171,7 @@ const NewOrder = () => {
           name: giftItem.name,
           price: 0,
           quantity: 1,
+          variant_name: null,
           is_free_gift: true
         });
       }
@@ -141,21 +180,18 @@ const NewOrder = () => {
   };
 
   const handleSubmit = async () => {
-    if (!address.trim()) {
-      toast.error('Please enter delivery address');
+    if (!notes.trim()) {
+      toast.error('Please enter customer notes / address');
       return;
     }
-    
     if (!selectedDriver) {
       toast.error('Please select a driver');
       return;
     }
-    
     if (cart.length === 0) {
       toast.error('Cart is empty');
       return;
     }
-
     const driver = drivers.find(d => d.id === selectedDriver);
     if (!driver) {
       toast.error('Invalid driver selected');
@@ -165,14 +201,13 @@ const NewOrder = () => {
     setSubmitting(true);
     try {
       await ordersApi.create({
-        address: address.trim(),
+        address: notes.trim(),
         items: buildOrderItems(),
         total: calculateTotal(),
         order_type: orderType,
         driver_id: selectedDriver,
         driver_name: driver.username
       });
-      
       toast.success('Order created successfully!');
       navigate('/service');
     } catch (error) {
@@ -199,248 +234,282 @@ const NewOrder = () => {
   return (
     <div className="p-4 max-w-2xl mx-auto pb-48" data-testid="new-order-page">
       {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
+      <div className="flex items-center gap-3 mb-5">
         <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
           <ShoppingCart className="h-5 w-5 text-primary" />
         </div>
         <div>
           <h1 className="text-2xl font-bold">New Order</h1>
-          <p className="text-muted-foreground">Create a delivery order</p>
+          <p className="text-sm text-muted-foreground">POS</p>
         </div>
       </div>
 
       {/* Order Type Selection */}
-      <Card className="mb-4" data-testid="order-type-card">
-        <CardContent className="p-4">
-          <Label className="flex items-center gap-2 mb-3">
-            <Package className="h-4 w-4" />
-            Order Type <span className="text-destructive">*</span>
-          </Label>
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              type="button"
-              onClick={() => setOrderType('delivery')}
-              className={`flex items-center justify-center gap-2 p-3 rounded-xl border-2 transition-all font-medium ${
-                orderType === 'delivery'
-                  ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400'
-                  : 'border-border hover:border-muted-foreground/30'
-              }`}
-              data-testid="order-type-delivery"
-            >
-              <Truck className="h-5 w-5" />
-              Delivery
-            </button>
-            <button
-              type="button"
-              onClick={() => setOrderType('pickup')}
-              className={`flex items-center justify-center gap-2 p-3 rounded-xl border-2 transition-all font-medium ${
-                orderType === 'pickup'
-                  ? 'border-violet-500 bg-violet-50 text-violet-700 dark:bg-violet-900/20 dark:text-violet-400'
-                  : 'border-border hover:border-muted-foreground/30'
-              }`}
-              data-testid="order-type-pickup"
-            >
-              <ShoppingBag className="h-5 w-5" />
-              Pickup
-            </button>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="grid grid-cols-2 gap-3 mb-4" data-testid="order-type-card">
+        <button
+          type="button"
+          onClick={() => setOrderType('delivery')}
+          className={`flex items-center justify-center gap-2 p-3 rounded-xl border-2 transition-all font-medium ${
+            orderType === 'delivery'
+              ? 'border-blue-500 bg-blue-50 text-blue-700 dark:bg-blue-900/20 dark:text-blue-400'
+              : 'border-border hover:border-muted-foreground/30'
+          }`}
+          data-testid="order-type-delivery"
+        >
+          <Truck className="h-5 w-5" />
+          Delivery
+        </button>
+        <button
+          type="button"
+          onClick={() => setOrderType('pickup')}
+          className={`flex items-center justify-center gap-2 p-3 rounded-xl border-2 transition-all font-medium ${
+            orderType === 'pickup'
+              ? 'border-violet-500 bg-violet-50 text-violet-700 dark:bg-violet-900/20 dark:text-violet-400'
+              : 'border-border hover:border-muted-foreground/30'
+          }`}
+          data-testid="order-type-pickup"
+        >
+          <ShoppingBag className="h-5 w-5" />
+          Pickup
+        </button>
+      </div>
 
-      {/* Address Input */}
+      {/* Customer Notes / Instructions (unified) */}
       <Card className="mb-4">
-        <CardContent className="p-4">
-          <Label htmlFor="address" className="flex items-center gap-2 mb-2">
-            <MapPin className="h-4 w-4" />
-            {orderType === 'pickup' ? 'Pickup Notes / Customer Info' : 'Delivery Address'}
+        <CardContent className="p-3">
+          <Label htmlFor="notes" className="flex items-center gap-2 mb-2 text-sm">
+            <MessageSquare className="h-4 w-4" />
+            Customer Notes / Instructions
           </Label>
           <Input
-            id="address"
-            value={address}
-            onChange={(e) => setAddress(e.target.value)}
-            placeholder={orderType === 'pickup' ? 'Customer name or notes...' : 'Enter delivery address...'}
-            className="h-12"
-            data-testid="address-input"
+            id="notes"
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Address, special requests, customer name..."
+            className="h-10"
+            data-testid="notes-input"
           />
         </CardContent>
       </Card>
 
-      {/* Driver Selection */}
-      <Card className="mb-4">
-        <CardContent className="p-4">
-          <Label className="flex items-center gap-2 mb-2">
-            <Truck className="h-4 w-4" />
-            Assign Driver <span className="text-destructive">*</span>
+      {/* Driver + Free Gift row */}
+      <div className="grid grid-cols-2 gap-3 mb-4">
+        <div>
+          <Label className="flex items-center gap-1 mb-1.5 text-xs font-medium text-muted-foreground">
+            <Truck className="h-3 w-3" />
+            Driver <span className="text-destructive">*</span>
           </Label>
           <Select value={selectedDriver} onValueChange={setSelectedDriver}>
-            <SelectTrigger className="h-12" data-testid="driver-select">
-              <SelectValue placeholder="Select a driver..." />
+            <SelectTrigger className="h-10" data-testid="driver-select">
+              <SelectValue placeholder="Select driver" />
             </SelectTrigger>
             <SelectContent>
-              {drivers.length === 0 ? (
-                <div className="p-4 text-center text-muted-foreground">
-                  No drivers available
-                </div>
-              ) : (
-                drivers.map((driver) => (
-                  <SelectItem key={driver.id} value={driver.id}>
-                    <div className="flex items-center gap-2">
-                      <User className="h-4 w-4" />
-                      {driver.username}
-                    </div>
-                  </SelectItem>
-                ))
-              )}
+              {drivers.map((driver) => (
+                <SelectItem key={driver.id} value={driver.id}>
+                  <span className="flex items-center gap-2">
+                    <User className="h-3 w-3" />
+                    {driver.username}
+                  </span>
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
-        </CardContent>
-      </Card>
-
-      {/* Free Gift Selection */}
-      <Card className="mb-4" data-testid="free-gift-card">
-        <CardContent className="p-4">
-          <Label className="flex items-center gap-2 mb-2">
-            <Gift className="h-4 w-4 text-primary" />
-            Free Gift (Optional Promo)
+        </div>
+        <div>
+          <Label className="flex items-center gap-1 mb-1.5 text-xs font-medium text-muted-foreground">
+            <Gift className="h-3 w-3" />
+            Free Gift
           </Label>
           <Select value={freeGiftId} onValueChange={setFreeGiftId}>
-            <SelectTrigger className="h-12" data-testid="free-gift-select">
-              <SelectValue placeholder="Select a free gift item..." />
+            <SelectTrigger className="h-10" data-testid="free-gift-select">
+              <SelectValue placeholder="None" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="none">No free gift</SelectItem>
               {inventory.filter(i => i.stock > 0).map((item) => (
                 <SelectItem key={item.id} value={item.id}>
-                  <div className="flex items-center gap-2">
-                    <Gift className="h-4 w-4 text-primary" />
-                    {item.name} ({item.stock} available)
-                  </div>
+                  {item.name}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-          {freeGiftId && freeGiftId !== 'none' && (
-            <div className="mt-2 p-2 bg-primary/10 rounded-lg flex items-center justify-between">
-              <span className="text-sm font-medium text-primary">
-                <Gift className="h-3 w-3 inline mr-1" />
-                {inventory.find(i => i.id === freeGiftId)?.name} - $0.00
-              </span>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setFreeGiftId('')}
-                className="h-6 px-2 text-xs"
-                data-testid="remove-free-gift"
-              >
-                Remove
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
-      {/* Product Search */}
-      <div className="relative mb-4">
+      {/* Free gift indicator */}
+      {freeGiftId && freeGiftId !== 'none' && (
+        <div className="mb-4 p-2 bg-primary/10 rounded-lg flex items-center justify-between text-sm">
+          <span className="font-medium text-primary">
+            <Gift className="h-3 w-3 inline mr-1" />
+            Free: {inventory.find(i => i.id === freeGiftId)?.name} — $0.00
+          </span>
+          <Button variant="ghost" size="sm" onClick={() => setFreeGiftId('')} className="h-6 px-2 text-xs" data-testid="remove-free-gift">
+            Remove
+          </Button>
+        </div>
+      )}
+
+      {/* Compact Product Search */}
+      <div className="relative mb-3">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
           placeholder="Search products..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="pl-10"
+          className="pl-10 h-10"
           data-testid="search-products"
         />
       </div>
 
-      {/* Products Grid */}
-      <h3 className="text-sm font-semibold text-muted-foreground mb-3">SELECT PRODUCTS</h3>
-      <ScrollArea className="h-[250px] mb-4">
-        <div className="grid grid-cols-2 gap-3">
+      {/* Compact Product List */}
+      <ScrollArea className="h-[220px] mb-4 border rounded-xl">
+        <div className="divide-y">
           {filteredInventory.map((item) => (
-            <Card 
-              key={item.id} 
-              className={`cursor-pointer transition-all ${item.stock <= 0 ? 'opacity-50' : 'hover:shadow-md'}`}
-              onClick={() => addToCart(item)}
+            <button
+              key={item.id}
+              type="button"
+              onClick={() => handleProductClick(item)}
+              disabled={item.stock <= 0}
+              className={`w-full flex items-center justify-between px-3 py-2.5 text-left transition-colors ${
+                item.stock <= 0 
+                  ? 'opacity-40 cursor-not-allowed' 
+                  : 'hover:bg-muted/60 active:bg-muted'
+              }`}
               data-testid={`product-${item.id}`}
             >
-              <CardContent className="p-3">
-                <div className="flex items-start justify-between mb-2">
-                  <h4 className="font-medium text-sm line-clamp-2">{item.name}</h4>
-                </div>
-                <p className="font-bold">{formatCurrency(item.price)}</p>
-                <div className="flex items-center justify-between mt-2">
-                  <span className={`text-xs ${item.stock <= 5 ? 'text-destructive' : 'text-muted-foreground'}`}>
-                    {item.stock <= 0 ? (
-                      <span className="flex items-center gap-1">
-                        <AlertTriangle className="h-3 w-3" />
-                        Out of Stock
-                      </span>
-                    ) : (
-                      `${item.stock} available`
-                    )}
-                  </span>
-                  {item.stock > 0 && (
-                    <div className="h-6 w-6 rounded-full bg-primary/10 flex items-center justify-center">
-                      <Plus className="h-4 w-4 text-primary" />
-                    </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-medium text-sm truncate">{item.name}</span>
+                  {item.variants?.length > 0 && (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">
+                      <Layers className="h-2.5 w-2.5 mr-0.5" />
+                      {item.variants.length}
+                    </Badge>
                   )}
                 </div>
-              </CardContent>
-            </Card>
+                <div className="flex items-center gap-2 mt-0.5">
+                  {item.variants?.length > 0 ? (
+                    <span className="text-xs text-muted-foreground">
+                      {formatCurrency(Math.min(...item.variants.map(v => v.price)))} – {formatCurrency(Math.max(...item.variants.map(v => v.price)))}
+                    </span>
+                  ) : (
+                    <span className="text-xs font-medium">{formatCurrency(item.price)}</span>
+                  )}
+                  <span className={`text-xs ${item.stock <= 5 ? 'text-destructive' : 'text-muted-foreground'}`}>
+                    {item.stock <= 0 ? (
+                      <span className="flex items-center gap-0.5"><AlertTriangle className="h-3 w-3" /> Out</span>
+                    ) : `${item.stock} left`}
+                  </span>
+                </div>
+              </div>
+              {item.stock > 0 && (
+                <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0 ml-2" />
+              )}
+            </button>
           ))}
+          {filteredInventory.length === 0 && (
+            <div className="p-6 text-center text-muted-foreground text-sm">No products found</div>
+          )}
         </div>
       </ScrollArea>
 
+      {/* Variant/Price Selection Dialog */}
+      <Dialog open={variantDialogOpen} onOpenChange={setVariantDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-lg">{selectedProduct?.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            {/* Variant options */}
+            {selectedProduct?.variants?.length > 0 && (
+              <div className="space-y-2">
+                <Label className="text-sm text-muted-foreground">Select Variant</Label>
+                <div className="grid grid-cols-1 gap-2">
+                  {selectedProduct.variants.map((v, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => handleVariantSelect(v)}
+                      className={`flex items-center justify-between p-3 rounded-lg border-2 transition-all text-left ${
+                        selectedVariant?.name === v.name
+                          ? 'border-primary bg-primary/5'
+                          : 'border-border hover:border-muted-foreground/40'
+                      }`}
+                      data-testid={`variant-option-${idx}`}
+                    >
+                      <span className="font-medium text-sm">{v.name}</span>
+                      <span className="text-sm font-semibold">{formatCurrency(v.price)}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Editable Price */}
+            <div className="space-y-2">
+              <Label htmlFor="custom-price" className="text-sm text-muted-foreground flex items-center justify-between">
+                <span>Price (editable for discounts)</span>
+              </Label>
+              <div className="flex items-center gap-2">
+                <span className="text-lg font-bold">$</span>
+                <Input
+                  id="custom-price"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={customPrice}
+                  onChange={(e) => setCustomPrice(e.target.value)}
+                  className="h-12 text-lg font-semibold"
+                  data-testid="custom-price-input"
+                />
+              </div>
+            </div>
+
+            {/* Add to cart */}
+            <Button
+              className="w-full h-11"
+              onClick={handleAddToCartFromDialog}
+              disabled={!customPrice || (selectedProduct?.variants?.length > 0 && !selectedVariant)}
+              data-testid="add-to-cart-btn"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Add to Cart — {customPrice ? formatCurrency(parseFloat(customPrice) || 0) : '$0.00'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Cart */}
       {cart.length > 0 && (
-        <Card className="fixed bottom-20 left-4 right-4 max-w-lg mx-auto shadow-xl border-t" data-testid="cart-summary">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-lg flex items-center justify-between">
-              <span>Cart ({paidItems.length} items)</span>
-              <span className="text-primary">{formatCurrency(calculateTotal())}</span>
+        <Card className="fixed bottom-20 left-4 right-4 max-w-lg mx-auto shadow-xl border-t z-50" data-testid="cart-summary">
+          <CardHeader className="pb-2 pt-3 px-4">
+            <CardTitle className="text-base flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <ShoppingCart className="h-4 w-4" />
+                Cart ({paidItems.reduce((s, i) => s + i.quantity, 0)})
+              </span>
+              <span className="text-primary font-bold">{formatCurrency(calculateTotal())}</span>
             </CardTitle>
           </CardHeader>
-          <CardContent className="pb-4">
-            <ScrollArea className="max-h-[120px] mb-4">
-              <div className="space-y-2">
+          <CardContent className="pb-4 px-4">
+            <ScrollArea className="max-h-[110px] mb-3">
+              <div className="space-y-1.5">
                 {cart.map((item, index) => (
-                  <div 
-                    key={`${item.item_id}-${index}`} 
-                    className="flex items-center justify-between p-2 rounded-lg bg-muted/50"
-                  >
-                    <div className="flex-1">
-                      <div className="font-medium text-sm">{item.name}</div>
-                      <div className="text-xs text-muted-foreground">
-                        {formatCurrency(item.price)} x {item.quantity}
-                      </div>
+                  <div key={`${item.item_id}-${index}`} className="flex items-center justify-between p-1.5 rounded-lg bg-muted/50 text-sm">
+                    <div className="flex-1 min-w-0">
+                      <div className="font-medium text-sm truncate">{item.name}</div>
+                      <div className="text-xs text-muted-foreground">{formatCurrency(item.price)} x {item.quantity}</div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={(e) => { e.stopPropagation(); updateQuantity(index, -1); }}
-                        data-testid={`decrease-${item.item_id}`}
-                      >
-                        <Minus className="h-4 w-4" />
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); updateQuantity(index, -1); }}>
+                        <Minus className="h-3 w-3" />
                       </Button>
-                      <span className="w-6 text-center font-medium">{item.quantity}</span>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={(e) => { e.stopPropagation(); updateQuantity(index, 1); }}
-                        data-testid={`increase-${item.item_id}`}
-                      >
-                        <Plus className="h-4 w-4" />
+                      <span className="w-5 text-center text-sm font-medium">{item.quantity}</span>
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); updateQuantity(index, 1); }}>
+                        <Plus className="h-3 w-3" />
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-destructive"
-                        onClick={(e) => { e.stopPropagation(); removeFromCart(index); }}
-                        data-testid={`remove-${item.item_id}`}
-                      >
-                        <Trash2 className="h-4 w-4" />
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={(e) => { e.stopPropagation(); removeFromCart(index); }}>
+                        <Trash2 className="h-3 w-3" />
                       </Button>
                     </div>
                   </div>
@@ -448,19 +517,18 @@ const NewOrder = () => {
               </div>
             </ScrollArea>
 
-            {/* Free gift preview in cart */}
             {freeGiftId && freeGiftId !== 'none' && (
-              <div className="p-2 mb-3 rounded-lg bg-primary/10 flex items-center gap-2 text-sm">
-                <Gift className="h-4 w-4 text-primary" />
-                <span className="font-medium">Free Gift: {inventory.find(i => i.id === freeGiftId)?.name}</span>
+              <div className="p-1.5 mb-2 rounded-lg bg-primary/10 flex items-center gap-2 text-xs">
+                <Gift className="h-3 w-3 text-primary" />
+                <span className="font-medium">Gift: {inventory.find(i => i.id === freeGiftId)?.name}</span>
                 <span className="text-muted-foreground ml-auto">$0.00</span>
               </div>
             )}
 
             <Button
-              className="w-full h-12"
+              className="w-full h-11"
               onClick={handleSubmit}
-              disabled={submitting || !address.trim() || !selectedDriver}
+              disabled={submitting || !notes.trim() || !selectedDriver}
               data-testid="submit-order"
             >
               {submitting ? (
@@ -468,7 +536,7 @@ const NewOrder = () => {
               ) : (
                 <Check className="h-5 w-5 mr-2" />
               )}
-              Place Order - {formatCurrency(calculateTotal())}
+              Place Order — {formatCurrency(calculateTotal())}
             </Button>
           </CardContent>
         </Card>
