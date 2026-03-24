@@ -62,6 +62,7 @@ class TokenResponse(BaseModel):
 class ItemVariant(BaseModel):
     name: str  # e.g., "Small", "Large", "Family Size"
     price: float
+    stock: int = 0  # Variant-specific stock
 
 class InventoryItem(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -407,16 +408,34 @@ async def create_order(order_data: OrderCreate, user = Depends(require_role(["bo
         inv_item = await db.inventory.find_one({"id": item.item_id}, {"_id": 0})
         if not inv_item:
             raise HTTPException(status_code=400, detail=f"Item {item.name} not found")
-        if inv_item["stock"] < item.quantity:
-            raise HTTPException(status_code=400, detail=f"Insufficient stock for {item.name}")
+        
+        # Check variant-level stock if variant specified and item has variants
+        if item.variant_name and inv_item.get("variants"):
+            variant = next((v for v in inv_item["variants"] if v["name"] == item.variant_name), None)
+            if not variant:
+                raise HTTPException(status_code=400, detail=f"Variant {item.variant_name} not found for {inv_item['name']}")
+            if variant.get("stock", 0) < item.quantity:
+                raise HTTPException(status_code=400, detail=f"Insufficient stock for {inv_item['name']} - {item.variant_name}")
+        else:
+            # Product-level stock for items without variants
+            if inv_item["stock"] < item.quantity:
+                raise HTTPException(status_code=400, detail=f"Insufficient stock for {item.name}")
     
     # Deduct inventory
     for item in order_data.items:
         if not item.is_free_gift:
-            await db.inventory.update_one(
-                {"id": item.item_id},
-                {"$inc": {"stock": -item.quantity}}
-            )
+            if item.variant_name:
+                # Deduct from variant-level stock
+                await db.inventory.update_one(
+                    {"id": item.item_id, "variants.name": item.variant_name},
+                    {"$inc": {"variants.$.stock": -item.quantity}}
+                )
+            else:
+                # Deduct from product-level stock
+                await db.inventory.update_one(
+                    {"id": item.item_id},
+                    {"$inc": {"stock": -item.quantity}}
+                )
     
     order = Order(
         address=order_data.address,
@@ -486,10 +505,16 @@ async def cancel_order(order_id: str, user = Depends(require_role(["boss", "cust
     # Restore inventory for cancelled order
     for item in existing["items"]:
         if not item.get("is_free_gift", False):
-            await db.inventory.update_one(
-                {"id": item["item_id"]},
-                {"$inc": {"stock": item["quantity"]}}
-            )
+            if item.get("variant_name"):
+                await db.inventory.update_one(
+                    {"id": item["item_id"], "variants.name": item["variant_name"]},
+                    {"$inc": {"variants.$.stock": item["quantity"]}}
+                )
+            else:
+                await db.inventory.update_one(
+                    {"id": item["item_id"]},
+                    {"$inc": {"stock": item["quantity"]}}
+                )
     
     await db.orders.update_one(
         {"id": order_id},
@@ -513,10 +538,16 @@ async def delete_order(order_id: str, user = Depends(require_role(["boss", "cust
     # Restore inventory
     for item in existing["items"]:
         if not item.get("is_free_gift", False):
-            await db.inventory.update_one(
-                {"id": item["item_id"]},
-                {"$inc": {"stock": item["quantity"]}}
-            )
+            if item.get("variant_name"):
+                await db.inventory.update_one(
+                    {"id": item["item_id"], "variants.name": item["variant_name"]},
+                    {"$inc": {"variants.$.stock": item["quantity"]}}
+                )
+            else:
+                await db.inventory.update_one(
+                    {"id": item["item_id"]},
+                    {"$inc": {"stock": item["quantity"]}}
+                )
     
     await db.orders.delete_one({"id": order_id})
     
@@ -886,26 +917,26 @@ async def seed_data():
     
     # Create inventory with variants
     inventory = [
-        InventoryItem(name="Premium Pizza", price=12.99, stock=50, variants=[
-            ItemVariant(name="Small", price=12.99),
-            ItemVariant(name="Medium", price=15.99),
-            ItemVariant(name="Large", price=19.99),
+        InventoryItem(name="Premium Pizza", price=12.99, stock=0, variants=[
+            ItemVariant(name="Small", price=12.99, stock=50),
+            ItemVariant(name="Medium", price=15.99, stock=30),
+            ItemVariant(name="Large", price=19.99, stock=20),
         ]).model_dump(),
-        InventoryItem(name="Classic Burger", price=9.99, stock=100, variants=[
-            ItemVariant(name="Single", price=9.99),
-            ItemVariant(name="Double", price=14.99),
+        InventoryItem(name="Classic Burger", price=9.99, stock=0, variants=[
+            ItemVariant(name="Single", price=9.99, stock=60),
+            ItemVariant(name="Double", price=14.99, stock=40),
         ]).model_dump(),
         InventoryItem(name="Caesar Salad", price=7.99, stock=30).model_dump(),
-        InventoryItem(name="Chicken Wings", price=10.99, stock=45, variants=[
-            ItemVariant(name="6 pcs", price=10.99),
-            ItemVariant(name="12 pcs", price=18.99),
-            ItemVariant(name="24 pcs", price=32.99),
+        InventoryItem(name="Chicken Wings", price=10.99, stock=0, variants=[
+            ItemVariant(name="6 pcs", price=10.99, stock=45),
+            ItemVariant(name="12 pcs", price=18.99, stock=25),
+            ItemVariant(name="24 pcs", price=32.99, stock=10),
         ]).model_dump(),
         InventoryItem(name="Pasta Carbonara", price=14.99, stock=25).model_dump(),
         InventoryItem(name="Fish & Chips", price=11.99, stock=40).model_dump(),
-        InventoryItem(name="Grilled Steak", price=24.99, stock=20, variants=[
-            ItemVariant(name="Regular", price=24.99),
-            ItemVariant(name="Premium Cut", price=34.99),
+        InventoryItem(name="Grilled Steak", price=24.99, stock=0, variants=[
+            ItemVariant(name="Regular", price=24.99, stock=20),
+            ItemVariant(name="Premium Cut", price=34.99, stock=10),
         ]).model_dump(),
         InventoryItem(name="Veggie Wrap", price=8.99, stock=35).model_dump(),
     ]

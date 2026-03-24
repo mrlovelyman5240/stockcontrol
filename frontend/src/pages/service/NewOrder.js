@@ -69,33 +69,44 @@ const NewOrder = () => {
     }
   };
 
+  // Helper: get total stock for product (sum of variant stocks or product-level)
+  const getProductTotalStock = (item) => {
+    if (item.variants?.length > 0) return item.variants.reduce((s, v) => s + (v.stock ?? 0), 0);
+    return item.stock;
+  };
+
   // Build flat list of gift options: products without variants + individual variants
   const giftOptions = inventory
-    .filter(item => item.stock > 0)
     .flatMap(item => {
       if (item.variants?.length > 0) {
-        return item.variants.map(v => ({
-          key: `${item.id}:::${v.name}`,
-          item_id: item.id,
-          label: `${item.name} - ${v.name}`,
-          variant_name: v.name,
-          stock: item.stock,
-        }));
+        return item.variants
+          .filter(v => (v.stock ?? 0) > 0)
+          .map(v => ({
+            key: `${item.id}:::${v.name}`,
+            item_id: item.id,
+            label: `${item.name} - ${v.name}`,
+            variant_name: v.name,
+            stock: v.stock ?? 0,
+          }));
       }
-      return [{
-        key: item.id,
-        item_id: item.id,
-        label: item.name,
-        variant_name: null,
-        stock: item.stock,
-      }];
+      if (item.stock > 0) {
+        return [{
+          key: item.id,
+          item_id: item.id,
+          label: item.name,
+          variant_name: null,
+          stock: item.stock,
+        }];
+      }
+      return [];
     });
 
   const selectedGiftOption = giftOptions.find(g => g.key === freeGiftId);
 
   // Product click handler — opens variant dialog or adds directly
   const handleProductClick = (item) => {
-    if (item.stock <= 0) {
+    const totalStock = getProductTotalStock(item);
+    if (totalStock <= 0) {
       toast.error('Item is out of stock');
       return;
     }
@@ -106,7 +117,6 @@ const NewOrder = () => {
       setCustomPrice('');
       setVariantDialogOpen(true);
     } else {
-      // No variants → add directly with base price (open dialog for editable price)
       setSelectedProduct(item);
       setSelectedVariant(null);
       setCustomPrice(item.price.toString());
@@ -138,7 +148,8 @@ const NewOrder = () => {
 
     if (existingIndex >= 0) {
       const newCart = [...cart];
-      if (newCart[existingIndex].quantity >= selectedProduct.stock) {
+      const maxStock = selectedVariant ? (selectedVariant.stock ?? 0) : selectedProduct.stock;
+      if (newCart[existingIndex].quantity >= maxStock) {
         toast.error('Not enough stock');
         return;
       }
@@ -173,9 +184,19 @@ const NewOrder = () => {
       setCart(cart.filter((_, i) => i !== index));
       return;
     }
-    if (inventoryItem && newQty > inventoryItem.stock) {
-      toast.error('Not enough stock');
-      return;
+    // Use variant-level stock if variant selected
+    if (inventoryItem) {
+      let maxStock;
+      if (item.variant_name && inventoryItem.variants?.length > 0) {
+        const variant = inventoryItem.variants.find(v => v.name === item.variant_name);
+        maxStock = variant ? (variant.stock ?? 0) : 0;
+      } else {
+        maxStock = inventoryItem.stock;
+      }
+      if (newQty > maxStock) {
+        toast.error('Not enough stock');
+        return;
+      }
     }
     newCart[index].quantity = newQty;
     setCart(newCart);
@@ -424,49 +445,52 @@ const NewOrder = () => {
       {/* Compact Product List */}
       <ScrollArea className="h-[220px] mb-4 border rounded-xl">
         <div className="divide-y">
-          {filteredInventory.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => handleProductClick(item)}
-              disabled={item.stock <= 0}
-              className={`w-full flex items-center justify-between px-3 py-2.5 text-left transition-colors ${
-                item.stock <= 0 
-                  ? 'opacity-40 cursor-not-allowed' 
-                  : 'hover:bg-muted/60 active:bg-muted'
-              }`}
-              data-testid={`product-${item.id}`}
-            >
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-medium text-sm truncate">{item.name}</span>
-                  {item.variants?.length > 0 && (
-                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">
-                      <Layers className="h-2.5 w-2.5 mr-0.5" />
-                      {item.variants.length}
-                    </Badge>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 mt-0.5">
-                  {item.variants?.length > 0 ? (
-                    <span className="text-xs text-muted-foreground">
-                      {formatCurrency(Math.min(...item.variants.map(v => v.price)))} – {formatCurrency(Math.max(...item.variants.map(v => v.price)))}
+          {filteredInventory.map((item) => {
+            const totalStock = getProductTotalStock(item);
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => handleProductClick(item)}
+                disabled={totalStock <= 0}
+                className={`w-full flex items-center justify-between px-3 py-2.5 text-left transition-colors ${
+                  totalStock <= 0 
+                    ? 'opacity-40 cursor-not-allowed' 
+                    : 'hover:bg-muted/60 active:bg-muted'
+                }`}
+                data-testid={`product-${item.id}`}
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-sm truncate">{item.name}</span>
+                    {item.variants?.length > 0 && (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">
+                        <Layers className="h-2.5 w-2.5 mr-0.5" />
+                        {item.variants.length}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    {item.variants?.length > 0 ? (
+                      <span className="text-xs text-muted-foreground">
+                        {formatCurrency(Math.min(...item.variants.map(v => v.price)))} – {formatCurrency(Math.max(...item.variants.map(v => v.price)))}
+                      </span>
+                    ) : (
+                      <span className="text-xs font-medium">{formatCurrency(item.price)}</span>
+                    )}
+                    <span className={`text-xs ${totalStock <= 5 ? 'text-destructive' : 'text-muted-foreground'}`}>
+                      {totalStock <= 0 ? (
+                        <span className="flex items-center gap-0.5"><AlertTriangle className="h-3 w-3" /> Out</span>
+                      ) : `${totalStock} left`}
                     </span>
-                  ) : (
-                    <span className="text-xs font-medium">{formatCurrency(item.price)}</span>
-                  )}
-                  <span className={`text-xs ${item.stock <= 5 ? 'text-destructive' : 'text-muted-foreground'}`}>
-                    {item.stock <= 0 ? (
-                      <span className="flex items-center gap-0.5"><AlertTriangle className="h-3 w-3" /> Out</span>
-                    ) : `${item.stock} left`}
-                  </span>
+                  </div>
                 </div>
-              </div>
-              {item.stock > 0 && (
-                <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0 ml-2" />
-              )}
-            </button>
-          ))}
+                {totalStock > 0 && (
+                  <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0 ml-2" />
+                )}
+              </button>
+            );
+          })}
           {filteredInventory.length === 0 && (
             <div className="p-6 text-center text-muted-foreground text-sm">No products found</div>
           )}
@@ -485,22 +509,34 @@ const NewOrder = () => {
               <div className="space-y-2">
                 <Label className="text-sm text-muted-foreground">Select Variant</Label>
                 <div className="grid grid-cols-1 gap-2">
-                  {selectedProduct.variants.map((v, idx) => (
-                    <button
-                      key={idx}
-                      type="button"
-                      onClick={() => handleVariantSelect(v)}
-                      className={`flex items-center justify-between p-3 rounded-lg border-2 transition-all text-left ${
-                        selectedVariant?.name === v.name
-                          ? 'border-primary bg-primary/5'
-                          : 'border-border hover:border-muted-foreground/40'
-                      }`}
-                      data-testid={`variant-option-${idx}`}
-                    >
-                      <span className="font-medium text-sm">{v.name}</span>
-                      <span className="text-sm font-semibold">{formatCurrency(v.price)}</span>
-                    </button>
-                  ))}
+                  {selectedProduct.variants.map((v, idx) => {
+                    const variantStock = v.stock ?? 0;
+                    const isOutOfStock = variantStock <= 0;
+                    return (
+                      <button
+                        key={idx}
+                        type="button"
+                        onClick={() => !isOutOfStock && handleVariantSelect(v)}
+                        disabled={isOutOfStock}
+                        className={`flex items-center justify-between p-3 rounded-lg border-2 transition-all text-left ${
+                          isOutOfStock
+                            ? 'opacity-40 cursor-not-allowed border-border bg-muted/30'
+                            : selectedVariant?.name === v.name
+                              ? 'border-primary bg-primary/5'
+                              : 'border-border hover:border-muted-foreground/40'
+                        }`}
+                        data-testid={`variant-option-${idx}`}
+                      >
+                        <div>
+                          <span className="font-medium text-sm">{v.name}</span>
+                          <span className={`ml-2 text-xs ${isOutOfStock ? 'text-destructive' : variantStock <= 5 ? 'text-amber-600' : 'text-muted-foreground'}`}>
+                            {isOutOfStock ? 'Out of stock' : `${variantStock} left`}
+                          </span>
+                        </div>
+                        <span className="text-sm font-semibold">{formatCurrency(v.price)}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}
