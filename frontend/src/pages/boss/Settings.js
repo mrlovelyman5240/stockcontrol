@@ -12,12 +12,12 @@ import { settingsApi, usersApi, authApi } from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { formatCurrency, getRoleLabel } from '../../lib/utils';
 import { toast } from 'sonner';
-import { Settings, DollarSign, Clock, Package, Loader2, Save, UserPlus, Users, Truck, Headphones, Lock } from 'lucide-react';
+import { Settings, DollarSign, Clock, Package, Loader2, Save, UserPlus, Users, Truck, Headphones, Lock, Trash2, AlertTriangle } from 'lucide-react';
 
 const BossSettings = () => {
-  const { createUser } = useAuth();
+  const { createUser, user: currentUser } = useAuth();
   const [settings, setSettings] = useState(null);
-  const [drivers, setDrivers] = useState([]);
+  const [allUsers, setAllUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
@@ -25,6 +25,8 @@ const BossSettings = () => {
   const [creatingUser, setCreatingUser] = useState(false);
   const [passwordForm, setPasswordForm] = useState({ current: '', newPass: '', confirm: '' });
   const [changingPassword, setChangingPassword] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -32,12 +34,12 @@ const BossSettings = () => {
 
   const fetchData = async () => {
     try {
-      const [settingsRes, driversRes] = await Promise.all([
+      const [settingsRes, usersRes] = await Promise.all([
         settingsApi.get(),
-        usersApi.getDrivers()
+        usersApi.getAll()
       ]);
       setSettings(settingsRes.data);
-      setDrivers(driversRes.data);
+      setAllUsers(usersRes.data);
     } catch (error) {
       toast.error('Failed to load settings');
     } finally {
@@ -118,6 +120,26 @@ const BossSettings = () => {
       setChangingPassword(false);
     }
   };
+
+  const handleDeleteUser = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await usersApi.delete(deleteTarget.id);
+      toast.success(`User "${deleteTarget.username}" deleted`);
+      setDeleteTarget(null);
+      fetchData();
+    } catch (error) {
+      const msg = error.response?.data?.detail;
+      toast.error(typeof msg === 'string' ? msg : 'Failed to delete user');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const staffUsers = allUsers.filter(u => u.id !== currentUser?.id);
+  const roleIcon = (role) => role === 'driver' ? Truck : role === 'customer_service' ? Headphones : Users;
+  const roleBadge = (role) => role === 'driver' ? 'Driver' : role === 'customer_service' ? 'CS' : 'Boss';
 
   if (loading) {
     return (
@@ -219,21 +241,67 @@ const BossSettings = () => {
           </Dialog>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-muted-foreground mb-3">Active Drivers ({drivers.length})</p>
-          {drivers.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-4">No drivers yet</p>
+          {/* Delete confirmation dialog */}
+          {deleteTarget && (
+            <Dialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2 text-destructive">
+                    <AlertTriangle className="h-5 w-5" />
+                    Delete User
+                  </DialogTitle>
+                </DialogHeader>
+                <p className="text-sm text-muted-foreground">
+                  Are you sure you want to delete <strong>{deleteTarget.username}</strong>? This action cannot be undone.
+                </p>
+                <div className="flex gap-2 mt-4">
+                  <Button variant="outline" className="flex-1" onClick={() => setDeleteTarget(null)} data-testid="cancel-delete-btn">
+                    Cancel
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    className="flex-1 gap-1"
+                    onClick={handleDeleteUser}
+                    disabled={deleting}
+                    data-testid="confirm-delete-btn"
+                  >
+                    {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                    Delete
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
+          )}
+
+          <p className="text-sm text-muted-foreground mb-3">Staff Accounts ({staffUsers.length})</p>
+          {staffUsers.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">No staff accounts yet. Click "Add User" to create one.</p>
           ) : (
-            <ScrollArea className="max-h-[150px]">
+            <ScrollArea className="max-h-[200px]">
               <div className="space-y-2">
-                {drivers.map((driver) => (
-                  <div key={driver.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <Truck className="h-4 w-4 text-muted-foreground" />
-                      <span className="font-medium">{driver.username}</span>
+                {staffUsers.map((u) => {
+                  const Icon = roleIcon(u.role);
+                  return (
+                    <div key={u.id} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg" data-testid={`user-row-${u.id}`}>
+                      <div className="flex items-center gap-2">
+                        <Icon className="h-4 w-4 text-muted-foreground" />
+                        <span className="font-medium">{u.username}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline">{roleBadge(u.role)}</Badge>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-destructive hover:text-destructive hover:bg-red-50 dark:hover:bg-red-950/30"
+                          onClick={() => setDeleteTarget(u)}
+                          data-testid={`delete-user-${u.id}`}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </div>
-                    <Badge variant="outline">Driver</Badge>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </ScrollArea>
           )}

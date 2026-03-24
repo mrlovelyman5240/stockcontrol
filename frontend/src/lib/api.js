@@ -34,6 +34,8 @@ export const authApi = {
 
 export const usersApi = {
   getDrivers: () => api.get('/users/drivers'),
+  getAll: () => api.get('/users/all'),
+  delete: (id) => api.delete(`/users/${id}`),
 };
 
 export const inventoryApi = {

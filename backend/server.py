@@ -312,6 +312,21 @@ async def get_drivers(user = Depends(require_role(["boss", "customer_service"]))
     drivers = await db.users.find({"role": "driver"}, {"_id": 0, "password": 0}).to_list(100)
     return [UserResponse(**d) for d in drivers]
 
+@api_router.get("/users/all")
+async def get_all_users(user = Depends(require_role(["boss"]))):
+    users = await db.users.find({}, {"_id": 0, "password": 0}).to_list(100)
+    return users
+
+@api_router.delete("/users/{user_id}")
+async def delete_user(user_id: str, user = Depends(require_role(["boss"]))):
+    if user_id == user["user_id"]:
+        raise HTTPException(status_code=400, detail="You cannot delete your own account")
+    target = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    await db.users.delete_one({"id": user_id})
+    return {"message": f"User '{target['username']}' deleted"}
+
 # ============== INVENTORY ROUTES ==============
 
 @api_router.get("/inventory", response_model=List[InventoryItem])
