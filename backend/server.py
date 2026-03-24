@@ -150,6 +150,7 @@ class DriverHours(BaseModel):
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
 class DriverHoursCreate(BaseModel):
+    driver_id: str  # Target driver (Boss/CS assigns hours)
     date: str
     hours: float
 
@@ -527,6 +528,18 @@ async def cancel_order(order_id: str, user = Depends(require_role(["boss", "cust
     )
     
     updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
+    
+    # Audit log
+    await create_audit_log(
+        action="cancel",
+        entity_type="order",
+        entity_id=order_id,
+        entity_name=f"Order #{order_id[:8]}",
+        user_id=user["user_id"],
+        user_name=user["username"],
+        details=f"Cancelled order worth ${existing['total']:.2f}"
+    )
+    
     return Order(**updated)
 
 @api_router.delete("/orders/{order_id}")
@@ -630,42 +643,53 @@ async def reject_payment(payment_id: str, user = Depends(require_role(["boss"]))
 
 # ============== DRIVER HOURS ROUTES ==============
 
-@api_router.get("/driver-hours", response_model=List[DriverHours])
+@api_router.get("/driver-hours")
 async def get_driver_hours(
     date: Optional[str] = None,
+    driver_id: Optional[str] = None,
     user = Depends(get_current_user)
 ):
-    query = {"driver_id": user["user_id"]} if user["role"] == "driver" else {}
+    query = {}
+    if user["role"] == "driver":
+        query["driver_id"] = user["user_id"]
+    elif driver_id:
+        query["driver_id"] = driver_id
     if date:
         query["date"] = date
     
-    hours = await db.driver_hours.find(query, {"_id": 0}).to_list(1000)
+    hours = await db.driver_hours.find(query, {"_id": 0}).sort("date", -1).to_list(1000)
     return [DriverHours(**h) for h in hours]
 
 @api_router.post("/driver-hours", response_model=DriverHours)
-async def log_driver_hours(hours_data: DriverHoursCreate, user = Depends(require_role(["driver"]))):
-    # Check if entry exists for this date
+async def log_driver_hours(hours_data: DriverHoursCreate, user = Depends(require_role(["boss", "customer_service"]))):
+    # Verify driver exists
+    driver = await db.users.find_one({"id": hours_data.driver_id, "role": "driver"}, {"_id": 0})
+    if not driver:
+        raise HTTPException(status_code=404, detail="Driver not found")
+    
+    # Check if entry exists for this driver+date
     existing = await db.driver_hours.find_one({
-        "driver_id": user["user_id"],
+        "driver_id": hours_data.driver_id,
         "date": hours_data.date
     }, {"_id": 0})
     
     if existing:
-        # Update existing
         await db.driver_hours.update_one(
             {"id": existing["id"]},
-            {"$set": {"hours": hours_data.hours}}
+            {"$set": {"hours": hours_data.hours, "logged_by": user["username"]}}
         )
         updated = await db.driver_hours.find_one({"id": existing["id"]}, {"_id": 0})
         return DriverHours(**updated)
     
-    # Create new
     driver_hours = DriverHours(
-        driver_id=user["user_id"],
+        driver_id=hours_data.driver_id,
         date=hours_data.date,
         hours=hours_data.hours
     )
-    await db.driver_hours.insert_one(driver_hours.model_dump())
+    doc = driver_hours.model_dump()
+    doc["logged_by"] = user["username"]
+    doc["driver_name"] = driver["username"]
+    await db.driver_hours.insert_one(doc)
     return driver_hours
 
 # ============== SETTINGS ROUTES ==============
@@ -701,6 +725,104 @@ async def update_settings(update: SettingsUpdate, user = Depends(require_role(["
 async def get_audit_logs(user = Depends(require_role(["boss"]))):
     logs = await db.audit_logs.find({}, {"_id": 0}).sort("timestamp", -1).to_list(1000)
     return [AuditLog(**log) for log in logs]
+
+# ============== FINANCIAL LEDGER ROUTE ==============
+
+@api_router.get("/ledger")
+async def get_financial_ledger(
+    type: Optional[str] = None,  # orders, deposits, hours
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    driver_id: Optional[str] = None,
+    search: Optional[str] = None,
+    user = Depends(require_role(["boss"]))
+):
+    ledger = []
+    
+    # Get completed orders
+    if not type or type == "orders":
+        order_query = {"status": {"$in": ["completed", "cancelled"]}}
+        if driver_id:
+            order_query["driver_id"] = driver_id
+        orders = await db.orders.find(order_query, {"_id": 0}).to_list(10000)
+        for o in orders:
+            ts = o.get("delivered_at") or o.get("updated_at") or o["created_at"]
+            if date_from and ts < date_from:
+                continue
+            if date_to and ts > date_to + "T23:59:59":
+                continue
+            entry = {
+                "id": o["id"],
+                "type": "order",
+                "subtype": o["status"],
+                "amount": o["total"],
+                "description": f"Order #{o['id'][:8]} ({o.get('order_type','delivery')}) - {o['status']}",
+                "driver_name": o.get("driver_name", ""),
+                "driver_id": o.get("driver_id", ""),
+                "timestamp": ts,
+                "details": {"items_count": len(o.get("items", [])), "order_type": o.get("order_type", "delivery")}
+            }
+            if search and search.lower() not in entry["description"].lower() and search.lower() not in entry["driver_name"].lower():
+                continue
+            ledger.append(entry)
+    
+    # Get deposits (payments)
+    if not type or type == "deposits":
+        pay_query = {}
+        if driver_id:
+            pay_query["driver_id"] = driver_id
+        payments = await db.payments.find(pay_query, {"_id": 0}).to_list(10000)
+        for p in payments:
+            ts = p.get("approved_at") or p["submitted_at"]
+            if date_from and ts < date_from:
+                continue
+            if date_to and ts > date_to + "T23:59:59":
+                continue
+            entry = {
+                "id": p["id"],
+                "type": "deposit",
+                "subtype": p["status"],
+                "amount": p["amount"],
+                "description": f"Deposit by {p['driver_name']} - {p['status']}",
+                "driver_name": p.get("driver_name", ""),
+                "driver_id": p.get("driver_id", ""),
+                "timestamp": ts,
+                "details": {"approved_by": p.get("approved_by", "")}
+            }
+            if search and search.lower() not in entry["description"].lower() and search.lower() not in entry["driver_name"].lower():
+                continue
+            ledger.append(entry)
+    
+    # Get hours logged
+    if not type or type == "hours":
+        hr_query = {}
+        if driver_id:
+            hr_query["driver_id"] = driver_id
+        hours = await db.driver_hours.find(hr_query, {"_id": 0}).to_list(10000)
+        for h in hours:
+            ts = h.get("created_at", h["date"])
+            if date_from and h["date"] < date_from:
+                continue
+            if date_to and h["date"] > date_to:
+                continue
+            entry = {
+                "id": h["id"],
+                "type": "hours",
+                "subtype": "logged",
+                "amount": h["hours"],
+                "description": f"{h.get('driver_name', 'Driver')} logged {h['hours']}h on {h['date']}",
+                "driver_name": h.get("driver_name", ""),
+                "driver_id": h.get("driver_id", ""),
+                "timestamp": ts,
+                "details": {"logged_by": h.get("logged_by", ""), "date": h["date"]}
+            }
+            if search and search.lower() not in entry["description"].lower() and search.lower() not in entry["driver_name"].lower():
+                continue
+            ledger.append(entry)
+    
+    # Sort by timestamp descending
+    ledger.sort(key=lambda x: x["timestamp"], reverse=True)
+    return ledger
 
 # ============== STATISTICS ROUTES ==============
 
