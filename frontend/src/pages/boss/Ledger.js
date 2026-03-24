@@ -68,9 +68,10 @@ const BossLedger = () => {
       if (dateFrom) params.date_from = dateFrom;
       if (dateTo) params.date_to = dateTo;
       const res = await ledgerApi.getAll(params);
-      setLedger(res.data);
+      setLedger(res.data || []);
     } catch (error) {
-      toast.error('Failed to load transactions');
+      setLedger([]);
+      if (error.response?.status !== 401) toast.error('Failed to load transactions');
     } finally {
       setLoading(false);
     }
@@ -80,9 +81,10 @@ const BossLedger = () => {
     setPaymentsLoading(true);
     try {
       const res = await paymentsApi.getAll({ status: 'pending' });
-      setPendingPayments(res.data);
+      setPendingPayments(res.data || []);
     } catch (error) {
-      toast.error('Failed to load pending deposits');
+      setPendingPayments([]);
+      if (error.response?.status !== 401) toast.error('Failed to load pending deposits');
     } finally {
       setPaymentsLoading(false);
     }
