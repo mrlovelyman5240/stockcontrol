@@ -47,6 +47,10 @@ class UserLogin(BaseModel):
     username: str
     password: str
 
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str
+
 class UserResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
@@ -285,6 +289,21 @@ async def get_me(user = Depends(get_current_user)):
     if not user_doc:
         raise HTTPException(status_code=404, detail="User not found")
     return UserResponse(**user_doc)
+
+@api_router.put("/auth/password")
+async def change_password(data: PasswordChange, user = Depends(get_current_user)):
+    user_doc = await db.users.find_one({"id": user["user_id"]}, {"_id": 0})
+    if not user_doc:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not verify_password(data.current_password, user_doc["password"]):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    if len(data.new_password) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
+    await db.users.update_one(
+        {"id": user["user_id"]},
+        {"$set": {"password": hash_password(data.new_password)}}
+    )
+    return {"message": "Password changed successfully"}
 
 # ============== USERS ROUTES ==============
 
@@ -1117,3 +1136,23 @@ logger = logging.getLogger(__name__)
 @app.on_event("shutdown")
 async def shutdown_db_client():
     client.close()
+
+@app.on_event("startup")
+async def ensure_boss_account():
+    """Create default Boss account on first run if none exists."""
+    existing_boss = await db.users.find_one({"role": "boss"}, {"_id": 0})
+    if not existing_boss:
+        boss_doc = {
+            "id": str(uuid.uuid4()),
+            "username": "admin",
+            "password": hash_password("admin123"),
+            "role": "boss",
+            "created_at": datetime.now(timezone.utc).isoformat()
+        }
+        await db.users.insert_one(boss_doc)
+        logger.info("Default Boss account created: admin / admin123")
+    # Ensure settings exist
+    existing_settings = await db.settings.find_one({"id": "global_settings"}, {"_id": 0})
+    if not existing_settings:
+        await db.settings.insert_one(Settings().model_dump())
+        logger.info("Default settings initialized")

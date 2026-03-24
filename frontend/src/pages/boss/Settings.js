@@ -8,11 +8,11 @@ import { Badge } from '../../components/ui/badge';
 import { ScrollArea } from '../../components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../../components/ui/dialog';
-import { settingsApi, usersApi } from '../../lib/api';
+import { settingsApi, usersApi, authApi } from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { formatCurrency, getRoleLabel } from '../../lib/utils';
 import { toast } from 'sonner';
-import { Settings, DollarSign, Clock, Package, Loader2, Save, UserPlus, Users, Truck, Headphones } from 'lucide-react';
+import { Settings, DollarSign, Clock, Package, Loader2, Save, UserPlus, Users, Truck, Headphones, Lock } from 'lucide-react';
 
 const BossSettings = () => {
   const { createUser } = useAuth();
@@ -23,6 +23,8 @@ const BossSettings = () => {
   const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
   const [newUser, setNewUser] = useState({ username: '', password: '', role: '' });
   const [creatingUser, setCreatingUser] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({ current: '', newPass: '', confirm: '' });
+  const [changingPassword, setChangingPassword] = useState(false);
 
   useEffect(() => {
     fetchData();
@@ -80,7 +82,7 @@ const BossSettings = () => {
         toast.success(`User "${newUser.username}" created successfully`);
         setNewUser({ username: '', password: '', role: '' });
         setIsUserDialogOpen(false);
-        fetchData(); // Refresh drivers list
+        fetchData();
       } else {
         toast.error(result.error);
       }
@@ -88,6 +90,32 @@ const BossSettings = () => {
       toast.error('Failed to create user');
     } finally {
       setCreatingUser(false);
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (!passwordForm.current || !passwordForm.newPass) {
+      toast.error('Please fill in all password fields');
+      return;
+    }
+    if (passwordForm.newPass !== passwordForm.confirm) {
+      toast.error('New passwords do not match');
+      return;
+    }
+    if (passwordForm.newPass.length < 4) {
+      toast.error('Password must be at least 4 characters');
+      return;
+    }
+    setChangingPassword(true);
+    try {
+      await authApi.changePassword(passwordForm.current, passwordForm.newPass);
+      toast.success('Password changed successfully');
+      setPasswordForm({ current: '', newPass: '', confirm: '' });
+    } catch (error) {
+      const msg = error.response?.data?.detail;
+      toast.error(typeof msg === 'string' ? msg : 'Failed to change password');
+    } finally {
+      setChangingPassword(false);
     }
   };
 
@@ -209,6 +237,61 @@ const BossSettings = () => {
               </div>
             </ScrollArea>
           )}
+        </CardContent>
+      </Card>
+
+      {/* Change Password */}
+      <Card className="mb-6" data-testid="change-password-card">
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <Lock className="h-5 w-5" />
+            Change Password
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="space-y-1">
+            <Label htmlFor="current-password" className="text-sm">Current Password</Label>
+            <Input
+              id="current-password"
+              type="password"
+              value={passwordForm.current}
+              onChange={(e) => setPasswordForm({ ...passwordForm, current: e.target.value })}
+              placeholder="Enter current password"
+              data-testid="current-password-input"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="new-password" className="text-sm">New Password</Label>
+            <Input
+              id="new-password"
+              type="password"
+              value={passwordForm.newPass}
+              onChange={(e) => setPasswordForm({ ...passwordForm, newPass: e.target.value })}
+              placeholder="Enter new password"
+              data-testid="new-password-input"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="confirm-password" className="text-sm">Confirm New Password</Label>
+            <Input
+              id="confirm-password"
+              type="password"
+              value={passwordForm.confirm}
+              onChange={(e) => setPasswordForm({ ...passwordForm, confirm: e.target.value })}
+              placeholder="Confirm new password"
+              data-testid="confirm-password-input"
+            />
+          </div>
+          <Button
+            variant="outline"
+            className="w-full"
+            onClick={handleChangePassword}
+            disabled={changingPassword}
+            data-testid="change-password-btn"
+          >
+            {changingPassword ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Lock className="h-4 w-4 mr-2" />}
+            Update Password
+          </Button>
         </CardContent>
       </Card>
 
