@@ -16,13 +16,13 @@ Build a full-stack delivery management app with 3 role-based access levels: Boss
 - Pending Collections view per driver
 - Admin Settings: Toggle driver compensation (Hourly vs Per Package), split Per Delivery Rate + Per Pickup Rate
 - Audit Log (hidden, tracks CS modifications)
-- Order & Inventory management (with variant support)
+- Order & Inventory management (with variant-level stock)
 
 ### Customer Service
 - Create orders via POS-style compact list with variant selection + editable price
-- Driver assignment (mandatory), Free Gift promo (searchable, variant-level), Order Type (Delivery/Pickup)
+- Driver assignment (mandatory), Free Gift promo (accordion product→variant picker), Order Type (Delivery/Pickup)
 - Mark Done / Cancel buttons on pending orders
-- Inventory management with custom variants
+- Inventory management with per-variant stock tracking
 
 ### Driver
 - Dashboard with earnings stats (delivery/pickup breakdown)
@@ -31,7 +31,7 @@ Build a full-stack delivery management app with 3 role-based access levels: Boss
 
 ## DB Schema
 - users: {id, username, password_hash, role, created_at}
-- inventory: {id, name, price, stock, variants: [{name, price}], created_at, updated_at}
+- inventory: {id, name, price, stock, variants: [{name, price, stock}], created_at, updated_at}
 - orders: {id, address, notes, items: [{item_id, name, price, quantity, variant_name, is_free_gift}], total, order_type, status, driver_id, driver_name, created_by, created_by_name, created_at, updated_at}
 - settings: {id, payment_method, hourly_rate, per_delivery_rate, per_pickup_rate, updated_at, updated_by}
 
@@ -47,17 +47,15 @@ Build a full-stack delivery management app with 3 role-based access levels: Boss
 - [x] Driver compensation settings (Hourly vs split Delivery/Pickup rates)
 - [x] Pending -> Done financial status workflow
 - [x] All dashboards for 3 roles
-- [x] Inventory management with custom variants (CRUD, add/edit/delete variant rows)
+- [x] Inventory management with custom variants + per-variant stock tracking
 - [x] Order creation with POS-style compact list + variant selection popover + editable price
 - [x] Order Type: Delivery/Pickup toggle with colored badges on all views
 - [x] Cancel button (red) on pending orders, inventory restored on cancel
-- [x] Free Gift: Searchable combobox showing "Product - Variant" format, $0.00 line item - Mar 24, 2026
+- [x] Free Gift: Accordion product→variant picker (search → expand product → select variant)
 - [x] Unified "Customer Notes / Instructions" field for both order types
+- [x] Variant-specific stock tracking (deduction, validation, cancel restore)
 - [x] Service worker (network-first strategy)
-- [x] Bug Fix: React crash on 422 error (getApiErrorMessage helper) - Mar 20, 2026
-- [x] Custom Variants system: Backend schema + inventory UI + POS variant dialog - Mar 24, 2026
-- [x] Compact POS-style product list replacing card grid - Mar 24, 2026
-- [x] Editable price on variant/product selection - Mar 24, 2026
+- [x] Bug Fix: React crash on 422 error (getApiErrorMessage helper)
 
 ## Upcoming Tasks (P1)
 - [ ] Driver Payment Submission Workflow ("Pay Boss" form + payment history)
