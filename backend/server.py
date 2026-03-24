@@ -1139,9 +1139,9 @@ async def shutdown_db_client():
 
 @app.on_event("startup")
 async def ensure_boss_account():
-    """Create default Boss account on first run if none exists."""
-    existing_boss = await db.users.find_one({"role": "boss"}, {"_id": 0})
-    if not existing_boss:
+    """Create default Boss account on first run if 'admin' doesn't exist."""
+    existing_admin = await db.users.find_one({"username": "admin"}, {"_id": 0})
+    if not existing_admin:
         boss_doc = {
             "id": str(uuid.uuid4()),
             "username": "admin",
