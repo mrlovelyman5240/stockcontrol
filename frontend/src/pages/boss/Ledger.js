@@ -179,52 +179,64 @@ const BossLedger = () => {
               <p className="text-sm mt-1">All driver deposits have been processed.</p>
             </div>
           ) : (
-            <div className="space-y-3 pb-24 overflow-y-auto max-h-[calc(100dvh-220px)]">
-              {pendingPayments.map((payment) => (
-                <Card key={payment.id} className="border-l-4 border-l-amber-400" data-testid={`deposit-${payment.id}`}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <div>
-                        <p className="font-semibold text-base">{payment.driver_name}</p>
-                        <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
-                          <Calendar className="h-3 w-3" />
-                          {formatDateTime(payment.submitted_at)}
-                        </p>
-                      </div>
-                      <p className="font-bold text-2xl">{formatCurrency(payment.amount)}</p>
+            <div className="overflow-y-auto max-h-[calc(100dvh-220px)] pb-24">
+              {/* Table Header */}
+              <div className="grid grid-cols-[1fr_auto_auto] items-center gap-4 px-3 py-2 text-[11px] font-semibold text-muted-foreground uppercase tracking-wider border-b">
+                <span>Driver</span>
+                <span className="text-right min-w-[80px]">Amount</span>
+                <span className="text-right min-w-[130px]">Actions</span>
+              </div>
+              {/* Rows */}
+              <div className="divide-y divide-border">
+                {pendingPayments.map((payment) => (
+                  <div
+                    key={payment.id}
+                    className="grid grid-cols-[1fr_auto_auto] items-center gap-4 px-3 py-2.5 hover:bg-muted/40 transition-colors"
+                    data-testid={`deposit-${payment.id}`}
+                  >
+                    {/* Left: Driver + Date */}
+                    <div className="min-w-0">
+                      <p className="font-semibold text-sm truncate">{payment.driver_name}</p>
+                      <p className="text-[11px] text-muted-foreground">{formatDateTime(payment.submitted_at)}</p>
                     </div>
-                    <div className="flex gap-2">
+                    {/* Middle: Amount */}
+                    <p className="font-bold text-sm text-emerald-600 dark:text-emerald-400 tabular-nums text-right min-w-[80px]">
+                      {formatCurrency(payment.amount)}
+                    </p>
+                    {/* Right: Action Buttons */}
+                    <div className="flex items-center gap-1.5 min-w-[130px] justify-end">
                       <Button
                         size="sm"
-                        className="flex-1 gap-1"
+                        variant="outline"
+                        className="h-7 px-2.5 text-xs gap-1 border-emerald-300 text-emerald-700 hover:bg-emerald-50 hover:text-emerald-800 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950/30"
                         onClick={() => handleApprove(payment.id)}
                         disabled={actionLoading === payment.id}
                         data-testid={`approve-deposit-${payment.id}`}
                       >
                         {actionLoading === payment.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <Loader2 className="h-3 w-3 animate-spin" />
                         ) : (
-                          <><CheckCircle className="h-4 w-4" /> Approve</>
+                          <><CheckCircle className="h-3 w-3" /> Approve</>
                         )}
                       </Button>
                       <Button
                         size="sm"
-                        variant="destructive"
-                        className="flex-1 gap-1"
+                        variant="outline"
+                        className="h-7 px-2.5 text-xs gap-1 border-red-300 text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-red-700 dark:text-red-400 dark:hover:bg-red-950/30"
                         onClick={() => handleReject(payment.id)}
                         disabled={actionLoading === payment.id}
                         data-testid={`reject-deposit-${payment.id}`}
                       >
                         {actionLoading === payment.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
+                          <Loader2 className="h-3 w-3 animate-spin" />
                         ) : (
-                          <><XCircle className="h-4 w-4" /> Reject</>
+                          <><XCircle className="h-3 w-3" /> Reject</>
                         )}
                       </Button>
                     </div>
-                  </CardContent>
-                </Card>
-              ))}
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </TabsContent>
