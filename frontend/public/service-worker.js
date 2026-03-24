@@ -1,6 +1,6 @@
 /* eslint-disable no-restricted-globals */
 
-const CACHE_NAME = 'logiflow-v2';
+const CACHE_NAME = 'mixy-logistics-v1';
 const urlsToCache = [
   '/',
   '/manifest.json'

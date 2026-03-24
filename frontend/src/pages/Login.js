@@ -7,7 +7,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { toast } from 'sonner';
-import { Truck, Sun, Moon, Loader2 } from 'lucide-react';
+import { Sun, Moon, Loader2 } from 'lucide-react';
 import { seedApi } from '../lib/api';
 
 const Login = () => {
@@ -99,11 +99,9 @@ const Login = () => {
 
       {/* Logo */}
       <div className="flex items-center gap-3 mb-8">
-        <div className="h-12 w-12 rounded-xl bg-primary flex items-center justify-center">
-          <Truck className="h-7 w-7 text-primary-foreground" />
-        </div>
+        <img src="/logo.png" alt="Mixy Logistics" className="h-12 w-12 rounded-xl object-cover" />
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">LogiFlow Pro</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Mixy Logistics</h1>
           <p className="text-sm text-muted-foreground">Delivery Management</p>
         </div>
       </div>
@@ -147,44 +145,6 @@ const Login = () => {
               Sign In
             </Button>
           </form>
-
-          {/* Demo credentials */}
-          <div className="mt-6 pt-6 border-t border-border">
-            <p className="text-sm text-muted-foreground text-center mb-3">Demo Credentials</p>
-            <div className="grid grid-cols-3 gap-2 text-xs">
-              <div 
-                className="p-2 rounded-lg bg-muted text-center cursor-pointer hover:bg-muted/80 transition-colors"
-                onClick={() => setLoginData({ username: 'boss', password: 'boss123' })}
-              >
-                <p className="font-medium">Boss</p>
-                <p className="text-muted-foreground">boss / boss123</p>
-              </div>
-              <div 
-                className="p-2 rounded-lg bg-muted text-center cursor-pointer hover:bg-muted/80 transition-colors"
-                onClick={() => setLoginData({ username: 'service1', password: 'service123' })}
-              >
-                <p className="font-medium">Service</p>
-                <p className="text-muted-foreground">service1 / service123</p>
-              </div>
-              <div 
-                className="p-2 rounded-lg bg-muted text-center cursor-pointer hover:bg-muted/80 transition-colors"
-                onClick={() => setLoginData({ username: 'driver1', password: 'driver123' })}
-              >
-                <p className="font-medium">Driver</p>
-                <p className="text-muted-foreground">driver1 / driver123</p>
-              </div>
-            </div>
-            <Button
-              variant="outline"
-              className="w-full mt-3"
-              onClick={handleSeedData}
-              disabled={seeding}
-              data-testid="seed-data-btn"
-            >
-              {seeding ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-              Load Demo Data
-            </Button>
-          </div>
         </CardContent>
       </Card>
     </div>

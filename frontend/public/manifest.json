@@ -1,6 +1,6 @@
 {
-  "short_name": "LogiFlow",
-  "name": "LogiFlow Pro - Delivery Management",
+  "short_name": "Mixy",
+  "name": "Mixy Logistics - Delivery Management",
   "description": "Complete delivery management system for businesses",
   "icons": [
     {
@@ -9,13 +9,13 @@
       "type": "image/x-icon"
     },
     {
-      "src": "logo192.png",
+      "src": "icon-192.png",
       "type": "image/png",
       "sizes": "192x192",
       "purpose": "any maskable"
     },
     {
-      "src": "logo512.png",
+      "src": "icon-512.png",
       "type": "image/png",
       "sizes": "512x512",
       "purpose": "any maskable"
@@ -33,7 +33,7 @@
       "short_name": "Order",
       "description": "Create a new delivery order",
       "url": "/service/new-order",
-      "icons": [{ "src": "logo192.png", "sizes": "192x192" }]
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
     }
   ]
 }

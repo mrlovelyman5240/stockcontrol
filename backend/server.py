@@ -27,7 +27,7 @@ JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = 24
 
 # Create the main app
-app = FastAPI(title="LogiFlow Pro API")
+app = FastAPI(title="Mixy Logistics API")
 
 # Create router with /api prefix
 api_router = APIRouter(prefix="/api")
