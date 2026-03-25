@@ -1191,6 +1191,7 @@ async def ensure_boss_account():
         boss_doc = {
             "id": str(uuid.uuid4()),
             "username": "admin",
+            "full_name": "Mıxy",
             "password": hash_password("admin123"),
             "role": "boss",
             "created_at": datetime.now(timezone.utc).isoformat()
