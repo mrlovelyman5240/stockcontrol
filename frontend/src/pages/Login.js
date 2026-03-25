@@ -55,9 +55,7 @@ const Login = () => {
     setLoading(false);
     
     if (result.success) {
-      toast.success(`Welcome back, ${result.user.full_name || result.user.username}!`);
-      console.log('Login successful, user role:', result.user.role);
-      // Small delay to ensure state is updated
+      // Redirect without toast
       setTimeout(() => {
         redirectByRole(result.user.role);
       }, 100);

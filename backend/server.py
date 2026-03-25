@@ -353,6 +353,16 @@ async def update_user(user_id: str, data: dict, user = Depends(require_role(["bo
     update = {}
     if "full_name" in data and data["full_name"]:
         update["full_name"] = data["full_name"]
+    if "username" in data and data["username"]:
+        if data["username"] != target["username"]:
+            existing = await db.users.find_one({"username": data["username"]}, {"_id": 0})
+            if existing:
+                raise HTTPException(status_code=400, detail="Username already taken")
+            update["username"] = data["username"]
+    if "password" in data and data["password"]:
+        if len(data["password"]) < 4:
+            raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
+        update["password"] = hash_password(data["password"])
     if update:
         await db.users.update_one({"id": user_id}, {"$set": update})
     updated = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})

@@ -10,28 +10,49 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../../components/ui/dialog';
 import { settingsApi, usersApi, authApi } from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
-import { formatCurrency, getRoleLabel } from '../../lib/utils';
+import { formatCurrency } from '../../lib/utils';
 import { toast } from 'sonner';
-import { Settings, DollarSign, Clock, Package, Loader2, Save, UserPlus, Users, Truck, Headphones, Lock, Trash2, AlertTriangle, KeyRound } from 'lucide-react';
+import {
+  Settings, DollarSign, Clock, Package, Loader2, Save, UserPlus,
+  Users, Truck, Headphones, Lock, Trash2, AlertTriangle, Pencil, User
+} from 'lucide-react';
 
 const BossSettings = () => {
-  const { createUser, user: currentUser } = useAuth();
+  const { createUser, user: currentUser, refreshUser } = useAuth();
   const [settings, setSettings] = useState(null);
   const [allUsers, setAllUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  // My Profile
+  const [myProfile, setMyProfile] = useState({ full_name: '', username: '', password: '' });
+  const [savingProfile, setSavingProfile] = useState(false);
+
+  // Add User dialog
   const [isUserDialogOpen, setIsUserDialogOpen] = useState(false);
   const [newUser, setNewUser] = useState({ username: '', fullName: '', password: '', role: '' });
   const [creatingUser, setCreatingUser] = useState(false);
-  const [passwordForm, setPasswordForm] = useState({ current: '', newPass: '', confirm: '' });
-  const [changingPassword, setChangingPassword] = useState(false);
+
+  // Edit User dialog
+  const [editTarget, setEditTarget] = useState(null);
+  const [editForm, setEditForm] = useState({ full_name: '', username: '', password: '' });
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  // Delete User dialog
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
-  const [resetTarget, setResetTarget] = useState(null);
-  const [resetPassword, setResetPassword] = useState('');
-  const [resetting, setResetting] = useState(false);
 
   useEffect(() => { fetchData(); }, []);
+
+  useEffect(() => {
+    if (currentUser) {
+      setMyProfile({
+        full_name: currentUser.full_name || '',
+        username: currentUser.username || '',
+        password: ''
+      });
+    }
+  }, [currentUser]);
 
   const fetchData = async () => {
     try {
@@ -48,6 +69,34 @@ const BossSettings = () => {
     }
   };
 
+  // ===== My Profile =====
+  const handleSaveMyProfile = async () => {
+    if (!myProfile.full_name.trim() || !myProfile.username.trim()) {
+      toast.error('Full Name and Username are required');
+      return;
+    }
+    if (myProfile.password && myProfile.password.length < 4) {
+      toast.error('Password must be at least 4 characters');
+      return;
+    }
+    setSavingProfile(true);
+    try {
+      const payload = { full_name: myProfile.full_name, username: myProfile.username };
+      if (myProfile.password) payload.password = myProfile.password;
+      await usersApi.update(currentUser.id, payload);
+      toast.success('Profile updated');
+      setMyProfile(prev => ({ ...prev, password: '' }));
+      await refreshUser();
+      fetchData();
+    } catch (error) {
+      const msg = error.response?.data?.detail;
+      toast.error(typeof msg === 'string' ? msg : 'Failed to update profile');
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
+  // ===== Compensation =====
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -57,7 +106,7 @@ const BossSettings = () => {
         per_delivery_rate: settings.per_delivery_rate,
         per_pickup_rate: settings.per_pickup_rate,
       });
-      toast.success('Settings saved successfully');
+      toast.success('Settings saved');
     } catch (error) {
       toast.error('Failed to save settings');
     } finally {
@@ -72,6 +121,7 @@ const BossSettings = () => {
     });
   };
 
+  // ===== Create User =====
   const handleCreateUser = async () => {
     if (!newUser.username || !newUser.password || !newUser.role) {
       toast.error('Please fill in all required fields');
@@ -95,32 +145,38 @@ const BossSettings = () => {
     }
   };
 
-  const handleChangePassword = async () => {
-    if (!passwordForm.current || !passwordForm.newPass) {
-      toast.error('Please fill in all password fields');
+  // ===== Edit User =====
+  const openEditDialog = (u) => {
+    setEditTarget(u);
+    setEditForm({ full_name: u.full_name || '', username: u.username || '', password: '' });
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editForm.full_name.trim() || !editForm.username.trim()) {
+      toast.error('Full Name and Username are required');
       return;
     }
-    if (passwordForm.newPass !== passwordForm.confirm) {
-      toast.error('New passwords do not match');
-      return;
-    }
-    if (passwordForm.newPass.length < 4) {
+    if (editForm.password && editForm.password.length < 4) {
       toast.error('Password must be at least 4 characters');
       return;
     }
-    setChangingPassword(true);
+    setSavingEdit(true);
     try {
-      await authApi.changePassword(passwordForm.current, passwordForm.newPass);
-      toast.success('Password changed successfully');
-      setPasswordForm({ current: '', newPass: '', confirm: '' });
+      const payload = { full_name: editForm.full_name, username: editForm.username };
+      if (editForm.password) payload.password = editForm.password;
+      await usersApi.update(editTarget.id, payload);
+      toast.success(`User "${editForm.full_name}" updated`);
+      setEditTarget(null);
+      fetchData();
     } catch (error) {
       const msg = error.response?.data?.detail;
-      toast.error(typeof msg === 'string' ? msg : 'Failed to change password');
+      toast.error(typeof msg === 'string' ? msg : 'Failed to update user');
     } finally {
-      setChangingPassword(false);
+      setSavingEdit(false);
     }
   };
 
+  // ===== Delete User =====
   const handleDeleteUser = async () => {
     if (!deleteTarget) return;
     setDeleting(true);
@@ -134,26 +190,6 @@ const BossSettings = () => {
       toast.error(typeof msg === 'string' ? msg : 'Failed to delete user');
     } finally {
       setDeleting(false);
-    }
-  };
-
-  const handleResetPassword = async () => {
-    if (!resetTarget || !resetPassword) return;
-    if (resetPassword.length < 4) {
-      toast.error('Password must be at least 4 characters');
-      return;
-    }
-    setResetting(true);
-    try {
-      await usersApi.resetPassword(resetTarget.id, resetPassword);
-      toast.success(`Password reset for ${resetTarget.full_name || resetTarget.username}`);
-      setResetTarget(null);
-      setResetPassword('');
-    } catch (error) {
-      const msg = error.response?.data?.detail;
-      toast.error(typeof msg === 'string' ? msg : 'Failed to reset password');
-    } finally {
-      setResetting(false);
     }
   };
 
@@ -182,76 +218,91 @@ const BossSettings = () => {
         </div>
       </div>
 
+      {/* ========== My Profile ========== */}
+      <Card className="mb-6" data-testid="my-profile-card">
+        <CardHeader>
+          <CardTitle className="text-lg flex items-center gap-2">
+            <User className="h-5 w-5" />
+            My Profile
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="space-y-1">
+            <Label className="text-sm">Full Name</Label>
+            <Input
+              value={myProfile.full_name}
+              onChange={(e) => setMyProfile({ ...myProfile, full_name: e.target.value })}
+              placeholder="Your display name"
+              data-testid="my-fullname-input"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-sm">Username (login)</Label>
+            <Input
+              value={myProfile.username}
+              onChange={(e) => setMyProfile({ ...myProfile, username: e.target.value })}
+              placeholder="Login username"
+              data-testid="my-username-input"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-sm">New Password <span className="text-muted-foreground text-xs">(leave blank to keep current)</span></Label>
+            <Input
+              type="password"
+              value={myProfile.password}
+              onChange={(e) => setMyProfile({ ...myProfile, password: e.target.value })}
+              placeholder="Enter new password"
+              data-testid="my-password-input"
+            />
+          </div>
+          <Button className="w-full" onClick={handleSaveMyProfile} disabled={savingProfile} data-testid="save-my-profile-btn">
+            {savingProfile ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+            Save Profile
+          </Button>
+        </CardContent>
+      </Card>
+
       {/* ========== User Management ========== */}
       <Card className="mb-6" data-testid="user-management-card">
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-lg flex items-center gap-2">
             <Users className="h-5 w-5" />
-            User Management
+            Staff
           </CardTitle>
           <Dialog open={isUserDialogOpen} onOpenChange={setIsUserDialogOpen}>
             <DialogTrigger asChild>
               <Button size="sm" data-testid="add-user-btn">
-                <UserPlus className="h-4 w-4 mr-2" />
-                Add User
+                <UserPlus className="h-4 w-4 mr-2" /> Add
               </Button>
             </DialogTrigger>
             <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Create New User</DialogTitle>
-              </DialogHeader>
+              <DialogHeader><DialogTitle>Create New User</DialogTitle></DialogHeader>
               <div className="space-y-4 mt-4">
-                <div className="space-y-2">
-                  <Label htmlFor="new-fullname">Full Name</Label>
-                  <Input
-                    id="new-fullname"
-                    value={newUser.fullName}
-                    onChange={(e) => setNewUser({ ...newUser, fullName: e.target.value })}
-                    placeholder="e.g. Mustafa Y."
-                    data-testid="new-user-fullname"
-                  />
+                <div className="space-y-1">
+                  <Label>Full Name</Label>
+                  <Input value={newUser.fullName} onChange={(e) => setNewUser({ ...newUser, fullName: e.target.value })} placeholder="e.g. Mustafa Y." data-testid="new-user-fullname" />
                   <p className="text-xs text-muted-foreground">Displayed throughout the app</p>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="new-username">Username (for login)</Label>
-                  <Input
-                    id="new-username"
-                    value={newUser.username}
-                    onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
-                    placeholder="e.g. mustafa123"
-                    data-testid="new-user-username"
-                  />
-                  <p className="text-xs text-muted-foreground">Used to sign in only</p>
+                <div className="space-y-1">
+                  <Label>Username (for login)</Label>
+                  <Input value={newUser.username} onChange={(e) => setNewUser({ ...newUser, username: e.target.value })} placeholder="e.g. mustafa123" data-testid="new-user-username" />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="new-password">Password</Label>
-                  <Input
-                    id="new-password"
-                    type="password"
-                    value={newUser.password}
-                    onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-                    placeholder="Min 4 characters"
-                    data-testid="new-user-password"
-                  />
+                <div className="space-y-1">
+                  <Label>Password</Label>
+                  <Input type="password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} placeholder="Min 4 characters" data-testid="new-user-password" />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="new-role">Role</Label>
+                <div className="space-y-1">
+                  <Label>Role</Label>
                   <Select value={newUser.role} onValueChange={(v) => setNewUser({ ...newUser, role: v })}>
-                    <SelectTrigger data-testid="new-user-role">
-                      <SelectValue placeholder="Select role" />
-                    </SelectTrigger>
+                    <SelectTrigger data-testid="new-user-role"><SelectValue placeholder="Select role" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="customer_service">
-                        <div className="flex items-center gap-2"><Headphones className="h-4 w-4" /> Customer Service</div>
-                      </SelectItem>
-                      <SelectItem value="driver">
-                        <div className="flex items-center gap-2"><Truck className="h-4 w-4" /> Driver</div>
-                      </SelectItem>
+                      <SelectItem value="customer_service"><div className="flex items-center gap-2"><Headphones className="h-4 w-4" /> Customer Service</div></SelectItem>
+                      <SelectItem value="driver"><div className="flex items-center gap-2"><Truck className="h-4 w-4" /> Driver</div></SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
                 <Button className="w-full" onClick={handleCreateUser} disabled={creatingUser} data-testid="create-user-btn">
-                  {creatingUser ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                  {creatingUser ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <UserPlus className="h-4 w-4 mr-2" />}
                   Create User
                 </Button>
               </div>
@@ -259,61 +310,10 @@ const BossSettings = () => {
           </Dialog>
         </CardHeader>
         <CardContent>
-          {/* Delete confirmation dialog */}
-          {deleteTarget && (
-            <Dialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle className="flex items-center gap-2 text-destructive">
-                    <AlertTriangle className="h-5 w-5" /> Delete User
-                  </DialogTitle>
-                </DialogHeader>
-                <p className="text-sm text-muted-foreground">
-                  Are you sure you want to delete <strong>{deleteTarget.full_name || deleteTarget.username}</strong>? This action cannot be undone.
-                </p>
-                <div className="flex gap-2 mt-4">
-                  <Button variant="outline" className="flex-1" onClick={() => setDeleteTarget(null)} data-testid="cancel-delete-btn">Cancel</Button>
-                  <Button variant="destructive" className="flex-1 gap-1" onClick={handleDeleteUser} disabled={deleting} data-testid="confirm-delete-btn">
-                    {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Delete
-                  </Button>
-                </div>
-              </DialogContent>
-            </Dialog>
-          )}
-
-          {/* Reset password dialog */}
-          {resetTarget && (
-            <Dialog open={!!resetTarget} onOpenChange={() => { setResetTarget(null); setResetPassword(''); }}>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle className="flex items-center gap-2">
-                    <KeyRound className="h-5 w-5" /> Reset Password
-                  </DialogTitle>
-                </DialogHeader>
-                <p className="text-sm text-muted-foreground">
-                  Set a new password for <strong>{resetTarget.full_name || resetTarget.username}</strong>
-                </p>
-                <div className="space-y-3 mt-3">
-                  <Input
-                    type="password"
-                    placeholder="Enter new password (min 4 chars)"
-                    value={resetPassword}
-                    onChange={(e) => setResetPassword(e.target.value)}
-                    data-testid="reset-password-input"
-                  />
-                  <Button className="w-full gap-1" onClick={handleResetPassword} disabled={resetting} data-testid="confirm-reset-btn">
-                    {resetting ? <Loader2 className="h-4 w-4 animate-spin" /> : <KeyRound className="h-4 w-4" />} Reset Password
-                  </Button>
-                </div>
-              </DialogContent>
-            </Dialog>
-          )}
-
-          <p className="text-sm text-muted-foreground mb-3">Staff Accounts ({staffUsers.length})</p>
           {staffUsers.length === 0 ? (
-            <p className="text-sm text-muted-foreground text-center py-4">No staff accounts yet. Click "Add User" to create one.</p>
+            <p className="text-sm text-muted-foreground text-center py-4">No staff accounts yet. Click "Add" to create one.</p>
           ) : (
-            <ScrollArea className="max-h-[250px]">
+            <ScrollArea className="max-h-[280px]">
               <div className="space-y-2">
                 {staffUsers.map((u) => {
                   const Icon = roleIcon(u.role);
@@ -323,29 +323,15 @@ const BossSettings = () => {
                         <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
                         <div className="min-w-0">
                           <span className="font-medium text-sm block truncate">{u.full_name || u.username}</span>
-                          {u.full_name && u.full_name !== u.username && (
-                            <span className="text-[11px] text-muted-foreground block">@{u.username}</span>
-                          )}
+                          <span className="text-[11px] text-muted-foreground block">@{u.username}</span>
                         </div>
                       </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <Badge variant="outline" className="text-[10px]">{roleBadge(u.role)}</Badge>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                          onClick={() => setResetTarget(u)}
-                          data-testid={`reset-pw-${u.id}`}
-                        >
-                          <KeyRound className="h-3.5 w-3.5" />
+                      <div className="flex items-center gap-1 shrink-0">
+                        <Badge variant="outline" className="text-[10px] mr-1">{roleBadge(u.role)}</Badge>
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditDialog(u)} data-testid={`edit-user-${u.id}`}>
+                          <Pencil className="h-3.5 w-3.5" />
                         </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7 text-destructive hover:text-destructive hover:bg-red-50 dark:hover:bg-red-950/30"
-                          onClick={() => setDeleteTarget(u)}
-                          data-testid={`delete-user-${u.id}`}
-                        >
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive hover:bg-red-50 dark:hover:bg-red-950/30" onClick={() => setDeleteTarget(u)} data-testid={`delete-user-${u.id}`}>
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
                       </div>
@@ -358,35 +344,54 @@ const BossSettings = () => {
         </CardContent>
       </Card>
 
-      {/* ========== Change My Password ========== */}
-      <Card className="mb-6" data-testid="change-password-card">
-        <CardHeader>
-          <CardTitle className="text-lg flex items-center gap-2">
-            <Lock className="h-5 w-5" />
-            Change My Password
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="space-y-1">
-            <Label htmlFor="current-password" className="text-sm">Current Password</Label>
-            <Input id="current-password" type="password" value={passwordForm.current} onChange={(e) => setPasswordForm({ ...passwordForm, current: e.target.value })} placeholder="Enter current password" data-testid="current-password-input" />
+      {/* ========== Edit User Dialog ========== */}
+      <Dialog open={!!editTarget} onOpenChange={(open) => { if (!open) setEditTarget(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Pencil className="h-5 w-5" /> Edit User</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 mt-2">
+            <div className="space-y-1">
+              <Label>Full Name</Label>
+              <Input value={editForm.full_name} onChange={(e) => setEditForm({ ...editForm, full_name: e.target.value })} data-testid="edit-fullname-input" />
+            </div>
+            <div className="space-y-1">
+              <Label>Username (login)</Label>
+              <Input value={editForm.username} onChange={(e) => setEditForm({ ...editForm, username: e.target.value })} data-testid="edit-username-input" />
+            </div>
+            <div className="space-y-1">
+              <Label>New Password <span className="text-muted-foreground text-xs">(leave blank to keep current)</span></Label>
+              <Input type="password" value={editForm.password} onChange={(e) => setEditForm({ ...editForm, password: e.target.value })} placeholder="Enter new password" data-testid="edit-password-input" />
+            </div>
+            <Button className="w-full" onClick={handleSaveEdit} disabled={savingEdit} data-testid="save-edit-btn">
+              {savingEdit ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+              Save Changes
+            </Button>
           </div>
-          <div className="space-y-1">
-            <Label htmlFor="new-password" className="text-sm">New Password</Label>
-            <Input id="new-password" type="password" value={passwordForm.newPass} onChange={(e) => setPasswordForm({ ...passwordForm, newPass: e.target.value })} placeholder="Enter new password" data-testid="new-password-input" />
-          </div>
-          <div className="space-y-1">
-            <Label htmlFor="confirm-password" className="text-sm">Confirm New Password</Label>
-            <Input id="confirm-password" type="password" value={passwordForm.confirm} onChange={(e) => setPasswordForm({ ...passwordForm, confirm: e.target.value })} placeholder="Confirm new password" data-testid="confirm-password-input" />
-          </div>
-          <Button variant="outline" className="w-full" onClick={handleChangePassword} disabled={changingPassword} data-testid="change-password-btn">
-            {changingPassword ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Lock className="h-4 w-4 mr-2" />}
-            Update Password
-          </Button>
-        </CardContent>
-      </Card>
+        </DialogContent>
+      </Dialog>
 
-      {/* ========== Payment Method Toggle ========== */}
+      {/* ========== Delete Confirmation Dialog ========== */}
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" /> Delete User
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Are you sure you want to delete <strong>{deleteTarget?.full_name || deleteTarget?.username}</strong>? This action cannot be undone.
+          </p>
+          <div className="flex gap-2 mt-4">
+            <Button variant="outline" className="flex-1" onClick={() => setDeleteTarget(null)} data-testid="cancel-delete-btn">Cancel</Button>
+            <Button variant="destructive" className="flex-1 gap-1" onClick={handleDeleteUser} disabled={deleting} data-testid="confirm-delete-btn">
+              {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ========== Compensation ========== */}
       <Card className="mb-6" data-testid="payment-method-card">
         <CardHeader>
           <CardTitle className="text-lg flex items-center gap-2">
@@ -411,11 +416,7 @@ const BossSettings = () => {
                 </p>
               </div>
             </div>
-            <Switch
-              checked={settings?.payment_method === 'hourly'}
-              onCheckedChange={togglePaymentMethod}
-              data-testid="payment-method-toggle"
-            />
+            <Switch checked={settings?.payment_method === 'hourly'} onCheckedChange={togglePaymentMethod} data-testid="payment-method-toggle" />
           </div>
 
           {settings?.payment_method === 'hourly' ? (
@@ -423,45 +424,23 @@ const BossSettings = () => {
               <Label className="text-sm">Rate per Hour</Label>
               <div className="relative">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
-                <Input
-                  type="number"
-                  className="pl-7"
-                  value={settings?.hourly_rate || ''}
-                  onChange={(e) => setSettings({ ...settings, hourly_rate: parseFloat(e.target.value) || 0 })}
-                  data-testid="hourly-rate-input"
-                />
+                <Input type="number" className="pl-7" value={settings?.hourly_rate || ''} onChange={(e) => setSettings({ ...settings, hourly_rate: parseFloat(e.target.value) || 0 })} data-testid="hourly-rate-input" />
               </div>
             </div>
           ) : (
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label className="text-sm flex items-center gap-2">
-                  <Truck className="h-4 w-4" /> Delivery Rate
-                </Label>
+                <Label className="text-sm flex items-center gap-2"><Truck className="h-4 w-4" /> Delivery Rate</Label>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
-                  <Input
-                    type="number"
-                    className="pl-7"
-                    value={settings?.per_delivery_rate || ''}
-                    onChange={(e) => setSettings({ ...settings, per_delivery_rate: parseFloat(e.target.value) || 0 })}
-                    data-testid="delivery-rate-input"
-                  />
+                  <Input type="number" className="pl-7" value={settings?.per_delivery_rate || ''} onChange={(e) => setSettings({ ...settings, per_delivery_rate: parseFloat(e.target.value) || 0 })} data-testid="delivery-rate-input" />
                 </div>
               </div>
               <div className="space-y-2">
-                <Label className="text-sm flex items-center gap-2">
-                  <Package className="h-4 w-4" /> Pickup Rate
-                </Label>
+                <Label className="text-sm flex items-center gap-2"><Package className="h-4 w-4" /> Pickup Rate</Label>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">$</span>
-                  <Input
-                    type="number"
-                    className="pl-7"
-                    value={settings?.per_pickup_rate || ''}
-                    onChange={(e) => setSettings({ ...settings, per_pickup_rate: parseFloat(e.target.value) || 0 })}
-                    data-testid="pickup-rate-input"
-                  />
+                  <Input type="number" className="pl-7" value={settings?.per_pickup_rate || ''} onChange={(e) => setSettings({ ...settings, per_pickup_rate: parseFloat(e.target.value) || 0 })} data-testid="pickup-rate-input" />
                 </div>
               </div>
             </div>
