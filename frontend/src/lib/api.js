@@ -36,6 +36,8 @@ export const usersApi = {
   getDrivers: () => api.get('/users/drivers'),
   getAll: () => api.get('/users/all'),
   delete: (id) => api.delete(`/users/${id}`),
+  resetPassword: (id, newPassword) => api.put(`/users/${id}/reset-password`, { new_password: newPassword }),
+  update: (id, data) => api.put(`/users/${id}/update`, data),
 };
 
 export const inventoryApi = {

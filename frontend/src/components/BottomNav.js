@@ -8,7 +8,6 @@ import {
   Wallet,
   ClipboardList,
   Settings,
-  FileText,
   Clock,
   BookOpen
 } from 'lucide-react';
@@ -39,6 +38,7 @@ const BottomNav = () => {
           { icon: ClipboardList, label: 'Orders', path: '/service/orders' },
           { icon: Package, label: 'Inventory', path: '/service/inventory' },
           { icon: Clock, label: 'Staff', path: '/service/staff' },
+          { icon: User, label: 'Profile', path: '/service/profile' },
         ];
       case 'driver':
         return [
@@ -63,7 +63,8 @@ const BottomNav = () => {
 
   return (
     <nav 
-      className="fixed bottom-0 left-0 right-0 h-16 bg-background/80 backdrop-blur-lg border-t border-border flex justify-around items-center z-50 safe-bottom"
+      className="fixed bottom-0 left-0 right-0 bg-background/70 backdrop-blur-xl border-t border-border/50 flex justify-around items-start z-50"
+      style={{ paddingBottom: 'max(env(safe-area-inset-bottom, 0px), 8px)' }}
       data-testid="bottom-nav"
     >
       {navItems.map((item) => {
@@ -75,15 +76,20 @@ const BottomNav = () => {
             key={item.path}
             onClick={() => navigate(item.path)}
             className={cn(
-              "flex flex-col items-center justify-center w-full h-full text-xs font-medium gap-1 transition-colors touch-action-manipulation",
+              "flex flex-col items-center justify-center min-w-[56px] pt-2.5 pb-1 text-[11px] font-medium gap-0.5 transition-all duration-150 active:scale-95",
               active 
                 ? "text-primary" 
                 : "text-muted-foreground hover:text-foreground"
             )}
             data-testid={`nav-${item.label.toLowerCase().replace(' ', '-')}`}
           >
-            <Icon className={cn("h-5 w-5", active && "stroke-[2.5px]")} />
-            <span>{item.label}</span>
+            <div className={cn(
+              "flex items-center justify-center w-10 h-7 rounded-full transition-colors",
+              active && "bg-primary/10"
+            )}>
+              <Icon className={cn("h-[22px] w-[22px]", active && "stroke-[2.5px]")} />
+            </div>
+            <span className={cn(active && "font-semibold")}>{item.label}</span>
           </button>
         );
       })}

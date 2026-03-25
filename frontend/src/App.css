@@ -135,9 +135,23 @@ button:active {
 /* Mobile optimizations */
 @media (max-width: 640px) {
     .touch-target {
-        min-height: 44px;
-        min-width: 44px;
+        min-height: 48px;
+        min-width: 48px;
     }
+}
+
+/* Safe area insets for PWA notch/home bar */
+.safe-top {
+    padding-top: env(safe-area-inset-top, 0px);
+}
+
+.safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Root-level safe area */
+#root {
+    padding-top: env(safe-area-inset-top, 0px);
 }
 
 /* Dark mode specific tweaks */

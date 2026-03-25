@@ -38,6 +38,7 @@ security = HTTPBearer()
 
 class UserBase(BaseModel):
     username: str
+    full_name: Optional[str] = None
     role: str  # boss, customer_service, driver
 
 class UserCreate(UserBase):
@@ -51,10 +52,14 @@ class PasswordChange(BaseModel):
     current_password: str
     new_password: str
 
+class ResetPasswordRequest(BaseModel):
+    new_password: str
+
 class UserResponse(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str
     username: str
+    full_name: Optional[str] = None
     role: str
     created_at: str
 
@@ -249,6 +254,7 @@ async def register(user_data: UserCreate):
     user_doc = {
         "id": user_id,
         "username": user_data.username,
+        "full_name": user_data.full_name or user_data.username,
         "password": hash_password(user_data.password),
         "role": user_data.role,
         "created_at": datetime.now(timezone.utc).isoformat()
@@ -261,6 +267,7 @@ async def register(user_data: UserCreate):
         user=UserResponse(
             id=user_id,
             username=user_data.username,
+            full_name=user_doc["full_name"],
             role=user_data.role,
             created_at=user_doc["created_at"]
         )
@@ -278,6 +285,7 @@ async def login(credentials: UserLogin):
         user=UserResponse(
             id=user["id"],
             username=user["username"],
+            full_name=user.get("full_name"),
             role=user["role"],
             created_at=user["created_at"]
         )
@@ -326,6 +334,29 @@ async def delete_user(user_id: str, user = Depends(require_role(["boss"]))):
         raise HTTPException(status_code=404, detail="User not found")
     await db.users.delete_one({"id": user_id})
     return {"message": f"User '{target['username']}' deleted"}
+
+@api_router.put("/users/{user_id}/reset-password")
+async def reset_user_password(user_id: str, data: ResetPasswordRequest, user = Depends(require_role(["boss"]))):
+    target = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if len(data.new_password) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
+    await db.users.update_one({"id": user_id}, {"$set": {"password": hash_password(data.new_password)}})
+    return {"message": f"Password reset for '{target['username']}'"}
+
+@api_router.put("/users/{user_id}/update")
+async def update_user(user_id: str, data: dict, user = Depends(require_role(["boss"]))):
+    target = await db.users.find_one({"id": user_id}, {"_id": 0})
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    update = {}
+    if "full_name" in data and data["full_name"]:
+        update["full_name"] = data["full_name"]
+    if update:
+        await db.users.update_one({"id": user_id}, {"$set": update})
+    updated = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
+    return updated
 
 # ============== INVENTORY ROUTES ==============
 

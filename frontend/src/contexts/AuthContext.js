@@ -75,12 +75,13 @@ export const AuthProvider = ({ children }) => {
   };
 
   // Function for Boss to create new users (drivers, customer service)
-  const createUser = async (username, password, role) => {
+  const createUser = async (username, password, role, fullName) => {
     try {
       const response = await axios.post(`${API_URL}/api/auth/register`, {
         username,
         password,
-        role
+        role,
+        full_name: fullName || username
       });
       return { success: true, user: response.data.user };
     } catch (error) {

@@ -64,7 +64,7 @@ const BossDashboard = () => {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold">Welcome, {user?.username}</h1>
+          <h1 className="text-2xl font-bold">Welcome, {user?.full_name || user?.username}</h1>
           <p className="text-muted-foreground">Boss Dashboard</p>
         </div>
         <div className="flex items-center gap-2">
