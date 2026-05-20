@@ -14,7 +14,7 @@ Para ve hesap kaybına yol açabilecek bug'lar. Sıra önemli.
 - [ ] **0.1** Public `/auth/register` endpoint'inden `boss` rolünü engelle (`backend/server.py:242`). Sadece `driver` ve `service` register edebilsin, `boss` ayrı bir admin akışıyla yaratılsın.
 - [x] **0.2** Startup'taki otomatik `admin/admin123` hesabı oluşturma kodunu kaldır (`backend/server.py:1197-1210`). İlk kurulumda env'den okunan tek seferlik setup token'ı ile yapılacak.
 - [x] **0.3** Public `/seed` endpoint'ini kaldır veya `if not PROD` ile koru (`backend/server.py:1115-1124`).
-- [ ] **0.4** **Sipariş toplamını backend'de yeniden hesapla.** Client'tan gelen `total` ve `price` field'larına güvenme. Item'ları DB'den çek, fiyatı oradan al, total'i backend hesapla (`backend/server.py:519`, `OrderItem` modeli `server.py:101`).
+- [x] **0.4** **Sipariş toplamını backend'de yeniden hesapla.** Client'tan gelen `total` ve `price` field'larına güvenme. Item'ları DB'den çek, fiyatı oradan al, total'i backend hesapla (`backend/server.py:519`, `OrderItem` modeli `server.py:101`).
 - [ ] **0.5** **Stok düşmeyi atomic yap.** Mongo'da koşullu `$inc` kullan (`stock >= quantity` filtresiyle) veya transaction kullan (`backend/server.py:481-505`). Race condition'ı kapat.
 - [ ] **0.6** `free_gift` ürünleri için stok düşme mantığını ekle veya server-side enforce et (`backend/server.py:482`). Şu an client `is_free_gift=true` yollarsa stok düşmüyor.
 - [ ] **0.7** `/orders/{id}` PUT endpoint'inde yetki kontrolü ekle (`backend/server.py:530`). Driver sadece kendi siparişini, sadece belirli status transition'larına geçebilsin. Genel update boss/service'e kısıtlansın.

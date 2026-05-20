@@ -126,7 +126,6 @@ class Order(BaseModel):
 class OrderCreate(BaseModel):
     address: str  # Customer notes / instructions
     items: List[OrderItem]
-    total: float
     order_type: str = "delivery"  # delivery or pickup
     driver_id: str  # Required - must assign driver at creation
     driver_name: str
@@ -476,47 +475,63 @@ async def create_order(order_data: OrderCreate, user = Depends(require_role(["bo
     driver = await db.users.find_one({"id": order_data.driver_id, "role": "driver"}, {"_id": 0})
     if not driver:
         raise HTTPException(status_code=400, detail="Invalid driver selected")
-    
-    # Validate and update inventory
+
+    if not order_data.items:
+        raise HTTPException(status_code=400, detail="Order must contain at least one item")
+
+    # Resolve authoritative price and stock from DB for each item; never trust client price/total.
+    resolved_items: List[OrderItem] = []
     for item in order_data.items:
-        if item.is_free_gift:
-            continue  # Don't deduct stock for free gifts
+        if item.quantity <= 0:
+            raise HTTPException(status_code=400, detail=f"Invalid quantity for {item.name}")
+
         inv_item = await db.inventory.find_one({"id": item.item_id}, {"_id": 0})
         if not inv_item:
             raise HTTPException(status_code=400, detail=f"Item {item.name} not found")
-        
-        # Check variant-level stock if variant specified and item has variants
+
         if item.variant_name and inv_item.get("variants"):
             variant = next((v for v in inv_item["variants"] if v["name"] == item.variant_name), None)
             if not variant:
                 raise HTTPException(status_code=400, detail=f"Variant {item.variant_name} not found for {inv_item['name']}")
-            if variant.get("stock", 0) < item.quantity:
-                raise HTTPException(status_code=400, detail=f"Insufficient stock for {inv_item['name']} - {item.variant_name}")
+            unit_price = float(variant.get("price", 0))
+            available_stock = int(variant.get("stock", 0))
         else:
-            # Product-level stock for items without variants
-            if inv_item["stock"] < item.quantity:
-                raise HTTPException(status_code=400, detail=f"Insufficient stock for {item.name}")
-    
+            unit_price = float(inv_item.get("price", 0))
+            available_stock = int(inv_item.get("stock", 0))
+
+        if not item.is_free_gift and available_stock < item.quantity:
+            raise HTTPException(status_code=400, detail=f"Insufficient stock for {item.name}")
+
+        resolved_items.append(OrderItem(
+            item_id=item.item_id,
+            name=inv_item["name"],
+            price=0.0 if item.is_free_gift else unit_price,
+            quantity=item.quantity,
+            variant_name=item.variant_name,
+            is_free_gift=item.is_free_gift,
+        ))
+
     # Deduct inventory
-    for item in order_data.items:
-        if not item.is_free_gift:
-            if item.variant_name:
-                # Deduct from variant-level stock
-                await db.inventory.update_one(
-                    {"id": item.item_id, "variants.name": item.variant_name},
-                    {"$inc": {"variants.$.stock": -item.quantity}}
-                )
-            else:
-                # Deduct from product-level stock
-                await db.inventory.update_one(
-                    {"id": item.item_id},
-                    {"$inc": {"stock": -item.quantity}}
-                )
-    
+    for item in resolved_items:
+        if item.is_free_gift:
+            continue
+        if item.variant_name:
+            await db.inventory.update_one(
+                {"id": item.item_id, "variants.name": item.variant_name},
+                {"$inc": {"variants.$.stock": -item.quantity}}
+            )
+        else:
+            await db.inventory.update_one(
+                {"id": item.item_id},
+                {"$inc": {"stock": -item.quantity}}
+            )
+
+    total = round(sum(i.price * i.quantity for i in resolved_items), 2)
+
     order = Order(
         address=order_data.address,
-        items=[OrderItem(**i.model_dump()) for i in order_data.items],
-        total=order_data.total,
+        items=resolved_items,
+        total=total,
         order_type=order_data.order_type,
         status="pending",  # Order starts as pending, assigned to driver
         driver_id=order_data.driver_id,
