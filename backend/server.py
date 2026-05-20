@@ -1199,7 +1199,17 @@ async def ensure_boss_account():
 
     Set INITIAL_BOSS_USERNAME and INITIAL_BOSS_PASSWORD to bootstrap the first
     boss account. Once any boss exists, these env vars are ignored.
+
+    Set CLEANUP_DEFAULT_ADMIN=true to delete the legacy hardcoded 'admin'
+    account on startup. Unset the env var after the next deploy.
     """
+    if os.environ.get("CLEANUP_DEFAULT_ADMIN", "").lower() == "true":
+        result = await db.users.delete_one({"username": "admin", "role": "boss"})
+        if result.deleted_count:
+            logger.warning("Legacy 'admin' boss account deleted via CLEANUP_DEFAULT_ADMIN")
+        else:
+            logger.info("CLEANUP_DEFAULT_ADMIN set but no legacy 'admin' boss found")
+
     initial_username = os.environ.get("INITIAL_BOSS_USERNAME")
     initial_password = os.environ.get("INITIAL_BOSS_PASSWORD")
     if not initial_username or not initial_password:
