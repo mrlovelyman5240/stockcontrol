@@ -1233,6 +1233,16 @@ async def shutdown_db_client():
     client.close()
 
 @app.on_event("startup")
+async def ensure_indexes():
+    """Create unique indexes for data integrity. Idempotent — safe to run on every boot."""
+    await db.users.create_index("username", unique=True)
+    await db.orders.create_index("id", unique=True)
+    await db.inventory.create_index("id", unique=True)
+    await db.payments.create_index("id", unique=True)
+    await db.driver_hours.create_index([("driver_id", 1), ("date", 1)], unique=True)
+    logger.info("MongoDB indexes ensured")
+
+@app.on_event("startup")
 async def ensure_boss_account():
     """Create initial Boss account from env vars if no boss exists yet.
 
