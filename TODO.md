@@ -19,7 +19,7 @@ Para ve hesap kaybına yol açabilecek bug'lar. Sıra önemli.
 - [x] **0.6** `free_gift` ürünleri için stok düşme mantığını ekle veya server-side enforce et (`backend/server.py:482`). Şu an client `is_free_gift=true` yollarsa stok düşmüyor.
 - [x] **0.7** `/orders/{id}` PUT endpoint'inde yetki kontrolü ekle (`backend/server.py:530`). Driver sadece kendi siparişini, sadece belirli status transition'larına geçebilsin. Genel update boss/service'e kısıtlansın.
 - [x] **0.8** `delete_order` içinde status kontrolü ekle (`backend/server.py:624`). Cancelled order silinirken stok ikinci kez restore edilmesin.
-- [ ] **0.9** Negatif değer validation ekle: `PaymentCreate.amount` ve `DriverHoursCreate.hours` için Pydantic'te `gt=0` (`backend/server.py:150, 164`). Inventory `price` ve `stock` için de `ge=0`.
+- [x] **0.9** Negatif değer validation ekle: `PaymentCreate.amount` ve `DriverHoursCreate.hours` için Pydantic'te `gt=0` (`backend/server.py:150, 164`). Inventory `price` ve `stock` için de `ge=0`.
 
 ---
 

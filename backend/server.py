@@ -70,15 +70,15 @@ class TokenResponse(BaseModel):
 
 class ItemVariant(BaseModel):
     name: str  # e.g., "Small", "Large", "Family Size"
-    price: float
-    stock: int = 0  # Variant-specific stock
+    price: float = Field(ge=0)
+    stock: int = Field(default=0, ge=0)  # Variant-specific stock
 
 class InventoryItem(BaseModel):
     model_config = ConfigDict(extra="ignore")
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
-    price: float  # Default/base price (first variant price or standalone)
-    stock: int
+    price: float = Field(ge=0)  # Default/base price (first variant price or standalone)
+    stock: int = Field(ge=0)
     variants: List[ItemVariant] = []  # Empty = single-price item
     bogo_enabled: bool = False
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -86,15 +86,15 @@ class InventoryItem(BaseModel):
 
 class InventoryCreate(BaseModel):
     name: str
-    price: float
-    stock: int
+    price: float = Field(ge=0)
+    stock: int = Field(ge=0)
     variants: List[ItemVariant] = []
     bogo_enabled: bool = False
 
 class InventoryUpdate(BaseModel):
     name: Optional[str] = None
-    price: Optional[float] = None
-    stock: Optional[int] = None
+    price: Optional[float] = Field(default=None, ge=0)
+    stock: Optional[int] = Field(default=None, ge=0)
     variants: Optional[List[ItemVariant]] = None
     bogo_enabled: Optional[bool] = None
 
@@ -147,7 +147,7 @@ class Payment(BaseModel):
     approved_by: Optional[str] = None
 
 class PaymentCreate(BaseModel):
-    amount: float
+    amount: float = Field(gt=0)
 
 class DriverHours(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -160,7 +160,7 @@ class DriverHours(BaseModel):
 class DriverHoursCreate(BaseModel):
     driver_id: str  # Target driver (Boss/CS assigns hours)
     date: str
-    hours: float
+    hours: float = Field(gt=0)
 
 class Settings(BaseModel):
     model_config = ConfigDict(extra="ignore")
