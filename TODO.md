@@ -17,7 +17,7 @@ Para ve hesap kaybına yol açabilecek bug'lar. Sıra önemli.
 - [x] **0.4** **Sipariş toplamını backend'de yeniden hesapla.** Client'tan gelen `total` ve `price` field'larına güvenme. Item'ları DB'den çek, fiyatı oradan al, total'i backend hesapla (`backend/server.py:519`, `OrderItem` modeli `server.py:101`).
 - [x] **0.5** **Stok düşmeyi atomic yap.** Mongo'da koşullu `$inc` kullan (`stock >= quantity` filtresiyle) veya transaction kullan (`backend/server.py:481-505`). Race condition'ı kapat.
 - [x] **0.6** `free_gift` ürünleri için stok düşme mantığını ekle veya server-side enforce et (`backend/server.py:482`). Şu an client `is_free_gift=true` yollarsa stok düşmüyor.
-- [ ] **0.7** `/orders/{id}` PUT endpoint'inde yetki kontrolü ekle (`backend/server.py:530`). Driver sadece kendi siparişini, sadece belirli status transition'larına geçebilsin. Genel update boss/service'e kısıtlansın.
+- [x] **0.7** `/orders/{id}` PUT endpoint'inde yetki kontrolü ekle (`backend/server.py:530`). Driver sadece kendi siparişini, sadece belirli status transition'larına geçebilsin. Genel update boss/service'e kısıtlansın.
 - [ ] **0.8** `delete_order` içinde status kontrolü ekle (`backend/server.py:624`). Cancelled order silinirken stok ikinci kez restore edilmesin.
 - [ ] **0.9** Negatif değer validation ekle: `PaymentCreate.amount` ve `DriverHoursCreate.hours` için Pydantic'te `gt=0` (`backend/server.py:150, 164`). Inventory `price` ve `stock` için de `ge=0`.
 

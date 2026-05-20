@@ -558,20 +558,36 @@ async def create_order(order_data: OrderCreate, user = Depends(require_role(["bo
     return order
 
 @api_router.put("/orders/{order_id}", response_model=Order)
-async def update_order(order_id: str, update: OrderUpdate, user = Depends(get_current_user)):
+async def update_order(
+    order_id: str,
+    update: OrderUpdate,
+    user = Depends(require_role(["boss", "customer_service"]))
+):
     existing = await db.orders.find_one({"id": order_id}, {"_id": 0})
     if not existing:
         raise HTTPException(status_code=404, detail="Order not found")
-    
+
     update_data = {k: v for k, v in update.model_dump().items() if v is not None}
+
+    if "status" in update_data and update_data["status"] not in {"pending", "completed", "cancelled"}:
+        raise HTTPException(status_code=400, detail="Invalid status value")
+
+    if "driver_id" in update_data:
+        driver = await db.users.find_one(
+            {"id": update_data["driver_id"], "role": "driver"}, {"_id": 0}
+        )
+        if not driver:
+            raise HTTPException(status_code=400, detail="Invalid driver selected")
+        # Force driver_name to match the actual driver record
+        update_data["driver_name"] = driver.get("full_name") or driver["username"]
+
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    
-    # If marking as completed (done), set completed_at timestamp
-    if update.status == "completed":
+
+    if update_data.get("status") == "completed":
         update_data["completed_at"] = datetime.now(timezone.utc).isoformat()
-    
+
     await db.orders.update_one({"id": order_id}, {"$set": update_data})
-    
+
     updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
     return Order(**updated)
 
