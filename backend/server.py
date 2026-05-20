@@ -1,8 +1,11 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.util import get_remote_address
 import os
 import logging
 from pathlib import Path
@@ -33,6 +36,11 @@ JWT_EXPIRATION_HOURS = 24
 
 # Create the main app
 app = FastAPI(title="Mixy Logistics API")
+
+# Rate limiter (per client IP). Used to throttle abuse-prone endpoints like login.
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Create router with /api prefix
 api_router = APIRouter(prefix="/api")
@@ -278,7 +286,8 @@ async def register(user_data: UserCreate, _ = Depends(require_role(["boss"]))):
     )
 
 @api_router.post("/auth/login", response_model=TokenResponse)
-async def login(credentials: UserLogin):
+@limiter.limit("5/minute")
+async def login(request: Request, credentials: UserLogin):
     user = await db.users.find_one({"username": credentials.username}, {"_id": 0})
     if not user or not verify_password(credentials.password, user["password"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
