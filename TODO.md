@@ -26,7 +26,7 @@ Para ve hesap kaybına yol açabilecek bug'lar. Sıra önemli.
 ## FAZ 1 — 🟡 ÖNEMLİ GÜVENLİK
 
 - [x] **1.1** `JWT_SECRET` hardcoded default'unu kaldır (`backend/server.py:25`). Env yoksa app başlamasın (fail-fast).
-- [ ] **1.2** CORS `*` yerine env'den `CORS_ORIGINS` oku, virgülle ayrılmış domain listesini parse et (`backend/server.py:1180`).
+- [x] **1.2** CORS `*` yerine env'den `CORS_ORIGINS` oku, virgülle ayrılmış domain listesini parse et (`backend/server.py:1180`).
 - [ ] **1.3** Login endpoint'ine rate limit ekle (`slowapi` paketiyle). Dakikada 5 deneme civarı (`backend/server.py:276`).
 - [ ] **1.4** Status/role/order_type/payment_method için Enum kullan, serbest string yerine (`backend/server.py:117, 126, 169`).
 - [ ] **1.5** Mongo'ya unique index ekle: `users.username`, `orders.id`, `inventory.id`, `payments.id`, `driver_hours(driver_id, date)`.

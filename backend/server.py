@@ -1170,10 +1170,19 @@ async def health_check():
 # Include router and middleware
 app.include_router(api_router)
 
+_cors_origins_raw = os.environ.get('CORS_ORIGINS', '').strip()
+if not _cors_origins_raw:
+    raise RuntimeError(
+        "CORS_ORIGINS environment variable is required. "
+        "Set it to a comma-separated list of allowed origins "
+        "(e.g. 'https://stockcontrol.vercel.app,http://localhost:3000')."
+    )
+_cors_origins = [origin.strip() for origin in _cors_origins_raw.split(',') if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=_cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )
