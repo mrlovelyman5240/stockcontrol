@@ -87,8 +87,4 @@ export const statsApi = {
   getDriverStats: (date) => api.get('/stats/driver', { params: { date } }),
 };
 
-export const seedApi = {
-  seed: () => api.post('/seed'),
-};
-
 export default api;

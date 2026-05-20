@@ -8,7 +8,6 @@ import { Label } from '../components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { toast } from 'sonner';
 import { Sun, Moon, Loader2 } from 'lucide-react';
-import { seedApi } from '../lib/api';
 
 const Login = () => {
   const navigate = useNavigate();
@@ -17,7 +16,6 @@ const Login = () => {
   
   const [loginData, setLoginData] = useState({ username: '', password: '' });
   const [loading, setLoading] = useState(false);
-  const [seeding, setSeeding] = useState(false);
 
   // Redirect if already authenticated
   useEffect(() => {
@@ -61,22 +59,6 @@ const Login = () => {
       }, 100);
     } else {
       toast.error(result.error);
-    }
-  };
-
-  const handleSeedData = async () => {
-    setSeeding(true);
-    try {
-      await seedApi.seed();
-      toast.success('Demo data seeded! Try logging in with boss/boss123');
-    } catch (error) {
-      if (error.response?.data?.message === 'Data already seeded') {
-        toast.info('Demo data already exists');
-      } else {
-        toast.error('Failed to seed data');
-      }
-    } finally {
-      setSeeding(false);
     }
   };
 

@@ -1110,61 +1110,6 @@ async def get_driver_stats(date: Optional[str] = None, user = Depends(require_ro
         "today_revenue": sum(o["total"] for o in today_completed)
     }
 
-# ============== SEED DATA ROUTE ==============
-
-@api_router.post("/seed")
-async def seed_data():
-    # Check if already seeded
-    existing_boss = await db.users.find_one({"username": "boss"}, {"_id": 0})
-    if existing_boss:
-        return {"message": "Data already seeded"}
-    
-    # Create users
-    users = [
-        {"id": str(uuid.uuid4()), "username": "boss", "password": hash_password("boss123"), "role": "boss", "created_at": datetime.now(timezone.utc).isoformat()},
-        {"id": str(uuid.uuid4()), "username": "service1", "password": hash_password("service123"), "role": "customer_service", "created_at": datetime.now(timezone.utc).isoformat()},
-        {"id": str(uuid.uuid4()), "username": "driver1", "password": hash_password("driver123"), "role": "driver", "created_at": datetime.now(timezone.utc).isoformat()},
-        {"id": str(uuid.uuid4()), "username": "driver2", "password": hash_password("driver123"), "role": "driver", "created_at": datetime.now(timezone.utc).isoformat()},
-    ]
-    await db.users.insert_many(users)
-    
-    # Create inventory with variants
-    inventory = [
-        InventoryItem(name="Premium Pizza", price=12.99, stock=0, variants=[
-            ItemVariant(name="Small", price=12.99, stock=50),
-            ItemVariant(name="Medium", price=15.99, stock=30),
-            ItemVariant(name="Large", price=19.99, stock=20),
-        ]).model_dump(),
-        InventoryItem(name="Classic Burger", price=9.99, stock=0, variants=[
-            ItemVariant(name="Single", price=9.99, stock=60),
-            ItemVariant(name="Double", price=14.99, stock=40),
-        ]).model_dump(),
-        InventoryItem(name="Caesar Salad", price=7.99, stock=30).model_dump(),
-        InventoryItem(name="Chicken Wings", price=10.99, stock=0, variants=[
-            ItemVariant(name="6 pcs", price=10.99, stock=45),
-            ItemVariant(name="12 pcs", price=18.99, stock=25),
-            ItemVariant(name="24 pcs", price=32.99, stock=10),
-        ]).model_dump(),
-        InventoryItem(name="Pasta Carbonara", price=14.99, stock=25).model_dump(),
-        InventoryItem(name="Fish & Chips", price=11.99, stock=40).model_dump(),
-        InventoryItem(name="Grilled Steak", price=24.99, stock=0, variants=[
-            ItemVariant(name="Regular", price=24.99, stock=20),
-            ItemVariant(name="Premium Cut", price=34.99, stock=10),
-        ]).model_dump(),
-        InventoryItem(name="Veggie Wrap", price=8.99, stock=35).model_dump(),
-    ]
-    await db.inventory.insert_many(inventory)
-    
-    # Create default settings
-    settings = Settings()
-    settings_dict = settings.model_dump()
-    # Ensure new rate fields exist
-    settings_dict["per_delivery_rate"] = 5.0
-    settings_dict["per_pickup_rate"] = 3.0
-    await db.settings.insert_one(settings_dict)
-    
-    return {"message": "Data seeded successfully", "users": [{"username": u["username"], "role": u["role"]} for u in users]}
-
 # ============== HEALTH CHECK ==============
 
 @api_router.get("/health")
