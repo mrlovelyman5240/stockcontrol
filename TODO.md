@@ -78,10 +78,10 @@ Mevcut görünümü modernleştirme ve tutarlılık.
 ## FAZ 5 — DEPLOYMENT
 
 ### Backend → Railway
-- [ ] **5.1** `backend/` içine `Procfile` veya `railway.json` ekle: start command `uvicorn server:app --host 0.0.0.0 --port $PORT`.
+- [x] **5.1** `backend/` içine `Procfile` veya `railway.json` ekle: start command `uvicorn server:app --host 0.0.0.0 --port $PORT`.
 - [ ] **5.2** Railway dashboard'da env değişkenlerini set et: `MONGO_URL`, `DB_NAME`, `JWT_SECRET`, `CORS_ORIGINS`.
 - [ ] **5.3** MongoDB Atlas (veya Railway Mongo plugin) bağlantısını doğrula.
-- [ ] **5.4** Health check endpoint ekle (`/health` → `{"status": "ok"}`).
+- [x] **5.4** Health check endpoint ekle (`/health` → `{"status": "ok"}`). (zaten mevcut: `/api/health`)
 
 ### Frontend → Vercel
 - [ ] **5.5** Vercel projesi oluştur, root directory `frontend`.
