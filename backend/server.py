@@ -479,7 +479,7 @@ async def create_order(order_data: OrderCreate, user = Depends(require_role(["bo
     if not order_data.items:
         raise HTTPException(status_code=400, detail="Order must contain at least one item")
 
-    # Resolve authoritative price and stock from DB for each item; never trust client price/total.
+    # Resolve authoritative price from DB for each item; never trust client price/total.
     resolved_items: List[OrderItem] = []
     for item in order_data.items:
         if item.quantity <= 0:
@@ -494,13 +494,8 @@ async def create_order(order_data: OrderCreate, user = Depends(require_role(["bo
             if not variant:
                 raise HTTPException(status_code=400, detail=f"Variant {item.variant_name} not found for {inv_item['name']}")
             unit_price = float(variant.get("price", 0))
-            available_stock = int(variant.get("stock", 0))
         else:
             unit_price = float(inv_item.get("price", 0))
-            available_stock = int(inv_item.get("stock", 0))
-
-        if not item.is_free_gift and available_stock < item.quantity:
-            raise HTTPException(status_code=400, detail=f"Insufficient stock for {item.name}")
 
         resolved_items.append(OrderItem(
             item_id=item.item_id,
@@ -511,20 +506,41 @@ async def create_order(order_data: OrderCreate, user = Depends(require_role(["bo
             is_free_gift=item.is_free_gift,
         ))
 
-    # Deduct inventory
+    # Atomically deduct inventory; rollback prior deductions if any fails (race-safe).
+    deducted: List[OrderItem] = []
     for item in resolved_items:
         if item.is_free_gift:
             continue
         if item.variant_name:
-            await db.inventory.update_one(
-                {"id": item.item_id, "variants.name": item.variant_name},
+            result = await db.inventory.update_one(
+                {
+                    "id": item.item_id,
+                    "variants": {"$elemMatch": {"name": item.variant_name, "stock": {"$gte": item.quantity}}},
+                },
                 {"$inc": {"variants.$.stock": -item.quantity}}
             )
         else:
-            await db.inventory.update_one(
-                {"id": item.item_id},
+            result = await db.inventory.update_one(
+                {"id": item.item_id, "stock": {"$gte": item.quantity}},
                 {"$inc": {"stock": -item.quantity}}
             )
+
+        if result.modified_count == 0:
+            # Rollback already-deducted items
+            for done in deducted:
+                if done.variant_name:
+                    await db.inventory.update_one(
+                        {"id": done.item_id, "variants.name": done.variant_name},
+                        {"$inc": {"variants.$.stock": done.quantity}}
+                    )
+                else:
+                    await db.inventory.update_one(
+                        {"id": done.item_id},
+                        {"$inc": {"stock": done.quantity}}
+                    )
+            raise HTTPException(status_code=400, detail=f"Insufficient stock for {item.name}")
+
+        deducted.append(item)
 
     total = round(sum(i.price * i.quantity for i in resolved_items), 2)
 
