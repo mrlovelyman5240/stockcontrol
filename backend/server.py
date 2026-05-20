@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional
 import uuid
 from datetime import datetime, timezone, timedelta
+from enum import Enum
 import jwt
 import bcrypt
 
@@ -49,10 +50,34 @@ security = HTTPBearer()
 
 # ============== MODELS ==============
 
+class UserRole(str, Enum):
+    boss = "boss"
+    customer_service = "customer_service"
+    driver = "driver"
+
+class OrderStatus(str, Enum):
+    pending = "pending"
+    completed = "completed"
+    cancelled = "cancelled"
+
+class OrderType(str, Enum):
+    delivery = "delivery"
+    pickup = "pickup"
+
+class PaymentStatus(str, Enum):
+    pending = "pending"
+    approved = "approved"
+    rejected = "rejected"
+
+class PaymentMethod(str, Enum):
+    hourly = "hourly"
+    per_package = "per_package"
+
 class UserBase(BaseModel):
+    model_config = ConfigDict(use_enum_values=True)
     username: str
     full_name: Optional[str] = None
-    role: str  # boss, customer_service, driver
+    role: UserRole
 
 class UserCreate(UserBase):
     password: str
@@ -73,7 +98,7 @@ class UserResponse(BaseModel):
     id: str
     username: str
     full_name: Optional[str] = None
-    role: str
+    role: UserRole
     created_at: str
 
 class TokenResponse(BaseModel):
@@ -120,14 +145,14 @@ class OrderItem(BaseModel):
     is_free_gift: bool = False
 
 class Order(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", use_enum_values=True)
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     address: str  # Also used as customer notes/instructions
     notes: Optional[str] = None  # Unified customer notes
     items: List[OrderItem]
     total: float
-    order_type: str = "delivery"  # delivery or pickup
-    status: str = "pending"  # pending, completed, cancelled
+    order_type: OrderType = OrderType.delivery
+    status: OrderStatus = OrderStatus.pending
     driver_id: Optional[str] = None
     driver_name: Optional[str] = None
     created_by: str
@@ -137,24 +162,26 @@ class Order(BaseModel):
     delivered_at: Optional[str] = None
 
 class OrderCreate(BaseModel):
+    model_config = ConfigDict(use_enum_values=True)
     address: str  # Customer notes / instructions
     items: List[OrderItem]
-    order_type: str = "delivery"  # delivery or pickup
+    order_type: OrderType = OrderType.delivery
     driver_id: str  # Required - must assign driver at creation
     driver_name: str
 
 class OrderUpdate(BaseModel):
-    status: Optional[str] = None
+    model_config = ConfigDict(use_enum_values=True)
+    status: Optional[OrderStatus] = None
     driver_id: Optional[str] = None
     driver_name: Optional[str] = None
 
 class Payment(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", use_enum_values=True)
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     driver_id: str
     driver_name: str
     amount: float
-    status: str = "pending"  # pending, approved, rejected
+    status: PaymentStatus = PaymentStatus.pending
     submitted_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     approved_at: Optional[str] = None
     approved_by: Optional[str] = None
@@ -176,9 +203,9 @@ class DriverHoursCreate(BaseModel):
     hours: float = Field(gt=0)
 
 class Settings(BaseModel):
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", use_enum_values=True)
     id: str = "global_settings"
-    payment_method: str = "per_package"  # hourly or per_package
+    payment_method: PaymentMethod = PaymentMethod.per_package
     hourly_rate: float = 15.0
     per_delivery_rate: float = 5.0
     per_pickup_rate: float = 3.0
@@ -186,7 +213,8 @@ class Settings(BaseModel):
     updated_by: Optional[str] = None
 
 class SettingsUpdate(BaseModel):
-    payment_method: Optional[str] = None
+    model_config = ConfigDict(use_enum_values=True)
+    payment_method: Optional[PaymentMethod] = None
     hourly_rate: Optional[float] = None
     per_delivery_rate: Optional[float] = None
     per_pickup_rate: Optional[float] = None
@@ -582,9 +610,6 @@ async def update_order(
         raise HTTPException(status_code=404, detail="Order not found")
 
     update_data = {k: v for k, v in update.model_dump().items() if v is not None}
-
-    if "status" in update_data and update_data["status"] not in {"pending", "completed", "cancelled"}:
-        raise HTTPException(status_code=400, detail="Invalid status value")
 
     if "driver_id" in update_data:
         driver = await db.users.find_one(
