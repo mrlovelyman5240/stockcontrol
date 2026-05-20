@@ -1195,19 +1195,32 @@ async def shutdown_db_client():
 
 @app.on_event("startup")
 async def ensure_boss_account():
-    """Create default Boss account on first run if 'admin' doesn't exist."""
-    existing_admin = await db.users.find_one({"username": "admin"}, {"_id": 0})
-    if not existing_admin:
-        boss_doc = {
-            "id": str(uuid.uuid4()),
-            "username": "admin",
-            "full_name": "Mıxy",
-            "password": hash_password("admin123"),
-            "role": "boss",
-            "created_at": datetime.now(timezone.utc).isoformat()
-        }
-        await db.users.insert_one(boss_doc)
-        logger.info("Default Boss account created: admin / admin123")
+    """Create initial Boss account from env vars if no boss exists yet.
+
+    Set INITIAL_BOSS_USERNAME and INITIAL_BOSS_PASSWORD to bootstrap the first
+    boss account. Once any boss exists, these env vars are ignored.
+    """
+    initial_username = os.environ.get("INITIAL_BOSS_USERNAME")
+    initial_password = os.environ.get("INITIAL_BOSS_PASSWORD")
+    if not initial_username or not initial_password:
+        return
+    existing_boss = await db.users.find_one({"role": "boss"}, {"_id": 0})
+    if existing_boss:
+        return
+    username_taken = await db.users.find_one({"username": initial_username}, {"_id": 0})
+    if username_taken:
+        logger.warning("INITIAL_BOSS_USERNAME '%s' already taken; skipping boss bootstrap", initial_username)
+        return
+    boss_doc = {
+        "id": str(uuid.uuid4()),
+        "username": initial_username,
+        "full_name": initial_username,
+        "password": hash_password(initial_password),
+        "role": "boss",
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    await db.users.insert_one(boss_doc)
+    logger.info("Initial Boss account created from env: %s", initial_username)
     # Ensure settings exist
     existing_settings = await db.settings.find_one({"id": "global_settings"}, {"_id": 0})
     if not existing_settings:
