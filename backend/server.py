@@ -507,10 +507,9 @@ async def create_order(order_data: OrderCreate, user = Depends(require_role(["bo
         ))
 
     # Atomically deduct inventory; rollback prior deductions if any fails (race-safe).
+    # Free gifts also deduct stock — they are real items leaving the warehouse.
     deducted: List[OrderItem] = []
     for item in resolved_items:
-        if item.is_free_gift:
-            continue
         if item.variant_name:
             result = await db.inventory.update_one(
                 {
@@ -613,20 +612,19 @@ async def cancel_order(order_id: str, user = Depends(require_role(["boss", "cust
     if existing["status"] != "pending":
         raise HTTPException(status_code=400, detail="Only pending orders can be cancelled")
     
-    # Restore inventory for cancelled order
+    # Restore inventory for cancelled order (free gifts included — they were deducted at creation)
     for item in existing["items"]:
-        if not item.get("is_free_gift", False):
-            if item.get("variant_name"):
-                await db.inventory.update_one(
-                    {"id": item["item_id"], "variants.name": item["variant_name"]},
-                    {"$inc": {"variants.$.stock": item["quantity"]}}
-                )
-            else:
-                await db.inventory.update_one(
-                    {"id": item["item_id"]},
-                    {"$inc": {"stock": item["quantity"]}}
-                )
-    
+        if item.get("variant_name"):
+            await db.inventory.update_one(
+                {"id": item["item_id"], "variants.name": item["variant_name"]},
+                {"$inc": {"variants.$.stock": item["quantity"]}}
+            )
+        else:
+            await db.inventory.update_one(
+                {"id": item["item_id"]},
+                {"$inc": {"stock": item["quantity"]}}
+            )
+
     await db.orders.update_one(
         {"id": order_id},
         {"$set": {
@@ -658,20 +656,19 @@ async def delete_order(order_id: str, user = Depends(require_role(["boss", "cust
     if not existing:
         raise HTTPException(status_code=404, detail="Order not found")
     
-    # Restore inventory
+    # Restore inventory (free gifts included — they were deducted at creation)
     for item in existing["items"]:
-        if not item.get("is_free_gift", False):
-            if item.get("variant_name"):
-                await db.inventory.update_one(
-                    {"id": item["item_id"], "variants.name": item["variant_name"]},
-                    {"$inc": {"variants.$.stock": item["quantity"]}}
-                )
-            else:
-                await db.inventory.update_one(
-                    {"id": item["item_id"]},
-                    {"$inc": {"stock": item["quantity"]}}
-                )
-    
+        if item.get("variant_name"):
+            await db.inventory.update_one(
+                {"id": item["item_id"], "variants.name": item["variant_name"]},
+                {"$inc": {"variants.$.stock": item["quantity"]}}
+            )
+        else:
+            await db.inventory.update_one(
+                {"id": item["item_id"]},
+                {"$inc": {"stock": item["quantity"]}}
+            )
+
     await db.orders.delete_one({"id": order_id})
     
     # Log if customer service
