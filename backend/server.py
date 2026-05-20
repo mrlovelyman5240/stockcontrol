@@ -239,16 +239,16 @@ async def create_audit_log(action: str, entity_type: str, entity_id: str, entity
 # ============== AUTH ROUTES ==============
 
 @api_router.post("/auth/register", response_model=TokenResponse)
-async def register(user_data: UserCreate):
-    # Check if username exists
+async def register(user_data: UserCreate, _ = Depends(require_role(["boss"]))):
+    # Only boss can create staff accounts. Boss itself is bootstrapped via env vars
+    # (INITIAL_BOSS_USERNAME / INITIAL_BOSS_PASSWORD), not through this endpoint.
     existing = await db.users.find_one({"username": user_data.username}, {"_id": 0})
     if existing:
         raise HTTPException(status_code=400, detail="Username already exists")
-    
-    # Validate role
-    if user_data.role not in ["boss", "customer_service", "driver"]:
+
+    if user_data.role not in ["customer_service", "driver"]:
         raise HTTPException(status_code=400, detail="Invalid role")
-    
+
     user_id = str(uuid.uuid4())
     user_doc = {
         "id": user_id,

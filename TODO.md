@@ -11,7 +11,7 @@
 
 Para ve hesap kaybına yol açabilecek bug'lar. Sıra önemli.
 
-- [ ] **0.1** Public `/auth/register` endpoint'inden `boss` rolünü engelle (`backend/server.py:242`). Sadece `driver` ve `service` register edebilsin, `boss` ayrı bir admin akışıyla yaratılsın.
+- [x] **0.1** Public `/auth/register` endpoint'inden `boss` rolünü engelle (`backend/server.py:242`). Sadece `driver` ve `service` register edebilsin, `boss` ayrı bir admin akışıyla yaratılsın.
 - [x] **0.2** Startup'taki otomatik `admin/admin123` hesabı oluşturma kodunu kaldır (`backend/server.py:1197-1210`). İlk kurulumda env'den okunan tek seferlik setup token'ı ile yapılacak.
 - [x] **0.3** Public `/seed` endpoint'ini kaldır veya `if not PROD` ile koru (`backend/server.py:1115-1124`).
 - [x] **0.4** **Sipariş toplamını backend'de yeniden hesapla.** Client'tan gelen `total` ve `price` field'larına güvenme. Item'ları DB'den çek, fiyatı oradan al, total'i backend hesapla (`backend/server.py:519`, `OrderItem` modeli `server.py:101`).
