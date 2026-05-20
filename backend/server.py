@@ -672,18 +672,20 @@ async def delete_order(order_id: str, user = Depends(require_role(["boss", "cust
     if not existing:
         raise HTTPException(status_code=404, detail="Order not found")
     
-    # Restore inventory (free gifts included — they were deducted at creation)
-    for item in existing["items"]:
-        if item.get("variant_name"):
-            await db.inventory.update_one(
-                {"id": item["item_id"], "variants.name": item["variant_name"]},
-                {"$inc": {"variants.$.stock": item["quantity"]}}
-            )
-        else:
-            await db.inventory.update_one(
-                {"id": item["item_id"]},
-                {"$inc": {"stock": item["quantity"]}}
-            )
+    # Restore inventory only for pending orders. Cancelled orders already returned
+    # stock at cancellation; completed orders' goods have been delivered.
+    if existing.get("status") == "pending":
+        for item in existing["items"]:
+            if item.get("variant_name"):
+                await db.inventory.update_one(
+                    {"id": item["item_id"], "variants.name": item["variant_name"]},
+                    {"$inc": {"variants.$.stock": item["quantity"]}}
+                )
+            else:
+                await db.inventory.update_one(
+                    {"id": item["item_id"]},
+                    {"$inc": {"stock": item["quantity"]}}
+                )
 
     await db.orders.delete_one({"id": order_id})
     
