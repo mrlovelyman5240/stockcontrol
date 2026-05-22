@@ -79,14 +79,14 @@ Mevcut görünümü modernleştirme ve tutarlılık.
 
 ### Backend → Railway
 - [x] **5.1** `backend/` içine `Procfile` veya `railway.json` ekle: start command `uvicorn server:app --host 0.0.0.0 --port $PORT`.
-- [ ] **5.2** Railway dashboard'da env değişkenlerini set et: `MONGO_URL`, `DB_NAME`, `JWT_SECRET`, `CORS_ORIGINS`.
-- [ ] **5.3** MongoDB Atlas (veya Railway Mongo plugin) bağlantısını doğrula.
+- [x] **5.2** Railway dashboard'da env değişkenlerini set et: `MONGO_URL`, `DB_NAME`, `JWT_SECRET`, `CORS_ORIGINS`.
+- [x] **5.3** MongoDB Atlas (veya Railway Mongo plugin) bağlantısını doğrula.
 - [x] **5.4** Health check endpoint ekle (`/health` → `{"status": "ok"}`). (zaten mevcut: `/api/health`)
 
 ### Frontend → Vercel
-- [ ] **5.5** Vercel projesi oluştur, root directory `frontend`.
-- [ ] **5.6** Build command `npm run build`, output directory `build`.
-- [ ] **5.7** Env değişkeni: `REACT_APP_BACKEND_URL=https://<railway-url>`.
+- [x] **5.5** Vercel projesi oluştur, root directory `frontend`.
+- [x] **5.6** Build command `npm run build`, output directory `build`. (Vite migration sonrası `dist` oldu)
+- [x] **5.7** Env değişkeni: `REACT_APP_BACKEND_URL=https://<railway-url>`.
 - [ ] **5.8** Custom domain bağla (varsa).
 - [ ] **5.9** Preview deployment'lar için CORS'ta Vercel preview pattern'ini kapsa (`https://*.vercel.app`).
 
