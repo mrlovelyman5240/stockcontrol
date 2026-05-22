@@ -1,0 +1,26 @@
+﻿Pass 3.
+
+With overrides 
+`json
+"overrides": {
+  "ajv": "8.17.1",
+  "ajv-keywords": "5.1.0",
+  "ajv-formats": "2.1.1",
+  "schema-utils": "4.2.0"
+}
+`
+
+Got:`n`Creating an optimized production build...
+NOT SUPPORTED: option missingRefs. Pass empty schema with  that should be ignored to ajv.addSchema.
+Failed to compile.
+TypeError: validateOptions is not a function`
+
+Some plugin needs schema-utils@2 (validateOptions API), others need 4 (validate). We're in dependency hell.
+
+Final question: is migrating CRA -> Vite faster than fixing this, given:
+- React 19, react-router 7, tailwind, lots of @radix-ui, axios, sonner, lucide-react
+- @emergentbase/visual-edits dep that's emergent-specific
+- ~80 files frontend
+- Mixy is a beginner, I want him to ship today
+
+Give concrete recommendation. If Vite, what exact steps + which files change?

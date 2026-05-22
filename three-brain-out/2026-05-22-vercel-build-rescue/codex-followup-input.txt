@@ -1,0 +1,39 @@
+FOLLOW-UP: First diagnosis was partially right but the fix didn't hold.
+
+Your suggestion (schema-utils 3.3.0 + ajv 6 + ajv-keywords 3) broke differently:
+"TypeError: validateOptions is not a function" — schema-utils@3 exports validate(), some plugin expects validateOptions() from schema-utils@2.
+
+Removed schema-utils pin, kept ajv 6 + ajv-keywords 3 overrides. New error:
+
+```
+MODULE_NOT_FOUND
+requireStack:
+  '.../node_modules/ajv-formats/dist/limit.js'
+  '.../node_modules/ajv-formats/dist/index.js'
+  '.../node_modules/schema-utils/dist/validate.js'
+  '.../node_modules/schema-utils/dist/index.js'
+  '.../node_modules/terser-webpack-plugin/dist/index.js'
+  '.../node_modules/react-scripts/config/webpack.config.js'
+  '.../node_modules/@craco/craco/dist/lib/cra.js'
+```
+
+So now ajv-formats wants ajv@8 paths, but we forced ajv@6.
+
+Stack realization: schema-utils@4 (which got installed when we removed pin) imports ajv-formats which needs ajv@8 + ajv-keywords@5. So whichever direction we pin ajv (6 or 8), one of {ajv-keywords, ajv-formats} breaks.
+
+Current overrides:
+```json
+"overrides": {
+  "ajv": "6.12.6",
+  "ajv-keywords": "3.5.2"
+}
+```
+
+The npm resolution is hoisting incompatible combinations because there's NO lockfile and --legacy-peer-deps lets bad layouts pass.
+
+QUESTIONS:
+1. What's the actual known-good combination for react-scripts@5.0.1 + craco@7.1.0 that builds cleanly?
+2. Is there a "blessed" overrides block CRA users use for this? Or do we need a completely different escape hatch (e.g., pin react-scripts to a specific version, swap craco out, etc.)?
+3. Concrete diff. Should I be pinning DIFFERENT packages? Should I downgrade react-scripts? Use yarn instead of npm?
+
+I just need this React app to build on Vercel. Don't care about elegance.
