@@ -35,7 +35,7 @@ Para ve hesap kaybına yol açabilecek bug'lar. Sıra önemli.
 
 ## FAZ 2 — REFACTOR (DRY, dosya bölme)
 
-- [ ] **2.1** `backend/server.py` (1187 satır) → `backend/routers/` altında `auth.py`, `users.py`, `orders.py`, `inventory.py`, `payments.py`, `settings.py` olarak böl. FastAPI `APIRouter` kullan.
+- [x] **2.1** `backend/server.py` (1187 satır) → `backend/routers/` altında `auth.py`, `users.py`, `orders.py`, `inventory.py`, `payments.py`, `settings.py` olarak böl. FastAPI `APIRouter` kullan. (+ driver_hours, audit, stats; server.py 1247→105 satır)
 - [x] **2.2** Frontend: `pages/boss/Inventory.js` + `pages/service/Inventory.js` → tek `pages/shared/Inventory.js` (role prop ile).
 - [x] **2.3** Frontend: `pages/boss/Staff.js` + `pages/service/Staff.js` → tek `pages/shared/Staff.js`.
 - [x] **2.4** `pages/service/NewOrder.js` (390 satır) → alt componentlere böl: `ProductSearch`, `Cart`, `GiftSelector`, `DriverSelect`. (+ `VariantDialog` extra; NewOrder 731→315 satır)
