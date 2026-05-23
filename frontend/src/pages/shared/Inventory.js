@@ -43,7 +43,11 @@ const Inventory = ({ role = 'boss' }) => {
         price: item.price.toString(),
         stock: item.stock?.toString() || '0',
         variants: item.variants?.length
-          ? item.variants.map(v => ({ name: v.name, price: v.price.toString(), stock: (v.stock ?? 0).toString() }))
+          ? item.variants.map(v => ({
+              name: v.name,
+              price: v.price.toString(),
+              units_per: (v.units_per ?? 1).toString(),
+            }))
           : []
       });
     } else {
@@ -54,7 +58,7 @@ const Inventory = ({ role = 'boss' }) => {
   };
 
   const addVariant = () => {
-    setFormData({ ...formData, variants: [...formData.variants, { name: '', price: '', stock: '' }] });
+    setFormData({ ...formData, variants: [...formData.variants, { name: '', price: '', units_per: '1' }] });
   };
 
   const updateVariant = (index, field, value) => {
@@ -80,8 +84,8 @@ const Inventory = ({ role = 'boss' }) => {
       toast.error('Please set a base price or add at least one variant');
       return;
     }
-    if (!hasVariants && !formData.stock) {
-      toast.error('Please set stock quantity');
+    if (!formData.stock) {
+      toast.error('Please set the base stock quantity');
       return;
     }
 
@@ -90,14 +94,14 @@ const Inventory = ({ role = 'boss' }) => {
       const parsedVariants = variants.map(v => ({
         name: v.name.trim(),
         price: parseFloat(v.price),
-        stock: parseInt(v.stock) || 0
+        units_per: parseInt(v.units_per) || 1,
       }));
       const basePrice = hasVariants ? parsedVariants[0].price : parseFloat(formData.price);
       const data = {
         name: formData.name,
         price: basePrice,
-        stock: hasVariants ? 0 : parseInt(formData.stock),
-        variants: parsedVariants
+        stock: parseInt(formData.stock),
+        variants: parsedVariants,
       };
 
       if (editItem) {
@@ -130,12 +134,8 @@ const Inventory = ({ role = 'boss' }) => {
     }
   };
 
-  const getItemTotalStock = (item) => {
-    if (item.variants?.length > 0) {
-      return item.variants.reduce((sum, v) => sum + (v.stock ?? 0), 0);
-    }
-    return item.stock;
-  };
+  // Base stock is the single source of truth; variants only describe how many units each consumes.
+  const getItemTotalStock = (item) => item.stock ?? 0;
 
   const filteredInventory = inventory.filter(item =>
     item.name.toLowerCase().includes(search.toLowerCase())
@@ -178,9 +178,26 @@ const Inventory = ({ role = 'boss' }) => {
               </div>
 
               <div className="space-y-3">
+                <Label className="flex items-center gap-2">
+                  <Layers className="h-4 w-4" /> Base Stock
+                </Label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={formData.stock}
+                  onChange={(e) => setFormData({ ...formData, stock: e.target.value })}
+                  placeholder="0"
+                  data-testid="item-stock-input"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Total inventory pool. Each variant below consumes a number of these units per sale.
+                </p>
+              </div>
+
+              <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <Label className="flex items-center gap-2">
-                    <Layers className="h-4 w-4" /> Variants & Stock
+                    <Layers className="h-4 w-4" /> Variants
                   </Label>
                   <Button type="button" variant="outline" size="sm" onClick={addVariant} data-testid="add-variant-btn">
                     <Plus className="h-3 w-3 mr-1" /> Add Variant
@@ -189,33 +206,30 @@ const Inventory = ({ role = 'boss' }) => {
 
                 {formData.variants.length === 0 ? (
                   <div className="space-y-3 p-3 rounded-lg border border-dashed">
-                    <p className="text-xs text-muted-foreground">No variants — single product with one price & stock.</p>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-1">
-                        <Label className="text-sm">Price ($)</Label>
-                        <Input type="number" step="0.01" min="0" value={formData.price} onChange={(e) => setFormData({ ...formData, price: e.target.value })} placeholder="0.00" data-testid="item-price-input" />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-sm">Stock</Label>
-                        <Input type="number" min="0" value={formData.stock} onChange={(e) => setFormData({ ...formData, stock: e.target.value })} placeholder="0" data-testid="item-stock-input" />
-                      </div>
+                    <p className="text-xs text-muted-foreground">No variants — single product with one price. Each sale removes 1 from base stock.</p>
+                    <div className="space-y-1">
+                      <Label className="text-sm">Price ($)</Label>
+                      <Input type="number" step="0.01" min="0" value={formData.price} onChange={(e) => setFormData({ ...formData, price: e.target.value })} placeholder="0.00" data-testid="item-price-input" />
                     </div>
                   </div>
                 ) : (
                   <div className="space-y-2">
                     <div className="grid grid-cols-[1fr_80px_70px_36px] gap-1.5 px-1 text-xs text-muted-foreground font-medium">
-                      <span>Name</span><span>Price</span><span>Stock</span><span></span>
+                      <span>Name</span><span>Price</span><span>Units</span><span></span>
                     </div>
                     {formData.variants.map((variant, idx) => (
                       <div key={idx} className="grid grid-cols-[1fr_80px_70px_36px] gap-1.5 items-center" data-testid={`variant-row-${idx}`}>
                         <Input placeholder="Variant name" value={variant.name} onChange={(e) => updateVariant(idx, 'name', e.target.value)} className="h-9" data-testid={`variant-name-${idx}`} />
                         <Input type="number" step="0.01" min="0" placeholder="$" value={variant.price} onChange={(e) => updateVariant(idx, 'price', e.target.value)} className="h-9" data-testid={`variant-price-${idx}`} />
-                        <Input type="number" min="0" placeholder="Qty" value={variant.stock} onChange={(e) => updateVariant(idx, 'stock', e.target.value)} className="h-9" data-testid={`variant-stock-${idx}`} />
+                        <Input type="number" min="1" placeholder="1" value={variant.units_per} onChange={(e) => updateVariant(idx, 'units_per', e.target.value)} className="h-9" data-testid={`variant-units-${idx}`} />
                         <Button type="button" variant="ghost" size="icon" className="h-9 w-9 text-destructive shrink-0" onClick={() => removeVariant(idx)} data-testid={`remove-variant-${idx}`}>
                           <X className="h-4 w-4" />
                         </Button>
                       </div>
                     ))}
+                    <p className="text-xs text-muted-foreground">
+                      "Units" = how many of Base Stock are consumed when 1 of this variant sells.
+                    </p>
                   </div>
                 )}
               </div>
@@ -266,7 +280,7 @@ const Inventory = ({ role = 'boss' }) => {
                             {item.variants.map((v, i) => (
                               <span key={i} className="text-muted-foreground">
                                 {v.name}: {formatCurrency(v.price)}
-                                <span className={`ml-1 text-xs ${(v.stock ?? 0) <= 3 ? 'text-destructive' : ''}`}>({v.stock ?? 0})</span>
+                                <span className="ml-1 text-xs">[{v.units_per ?? 1}u]</span>
                               </span>
                             ))}
                           </div>
