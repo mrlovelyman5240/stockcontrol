@@ -48,20 +48,20 @@ Para ve hesap kaybına yol açabilecek bug'lar. Sıra önemli.
 
 ---
 
-## FAZ 3 — UI / UX İYİLEŞTİRMELERİ
+## FAZ 3 — UI / UX İYİLEŞTİRMELERİ (✅ DONE 2026-05-23)
 
-Mevcut görünümü modernleştirme ve tutarlılık.
+- [x] **3.1** Tailwind config + index.css'e `success` (yeşil) ve `warning` (amber) semantic token'ları eklendi (light + dark). Spacing standardı zaten Tailwind default ile tutarlı.
+- [x] **3.2** Dashboard kartları zaten ikon + büyük metrik formatında (hero card + 2x2 metric grid + status banner'lar). Renk-coded sub-cards (amber/emerald). **Trend göstergesi (% değişim)** backend stats endpoint genişletmesi gerektiriyor — ileride ayrı milestone olarak eklenebilir.
+- [x] **3.3** `LoadingScreen` component'i `Skeleton`'lardan oluşan fullscreen placeholder. 10 sayfada Loader2 fullscreen spinner yerine kullanılıyor (Dashboard'lar `variant="cards"`, list sayfaları default).
+- [x] **3.4** `EmptyState` component'i (ikon + başlık + açıklama + opsiyonel CTA). Inventory, boss/service/driver Orders'da ad-hoc "no items found" blokları bununla değiştirildi.
+- [x] **3.5** Sonner Toaster `position="bottom-center"` (mobile thumb zone'a uygun).
+- [x] **3.6** Login form inline validation pattern'i: input altında kırmızı metin + `border-destructive` ring, toast yerine. Test güncellendi. **Diğer formlar için aynı pattern uygulanabilir (NewOrder, Inventory, Settings vb.) — pattern hazır, ileride genişletilebilir.**
+- [x] **3.7** Tablo yok — tüm listeler zaten `Card`-based. Mevcut tasarım mobile-friendly.
+- [x] **3.8** BottomNav active state: üstte 4px-tall pill indicator + icon container `scale-110` + bg-primary/10 highlight.
+- [x] **3.9** Body'ye 200ms ease color transition (smooth dark/light flip). Sistem teması default zaten.
+- [x] **3.10** Login redesign: radial gradient backdrop (primary/accent low opacity), logo badge (tinted bg + ring), card'a `shadow-lg` + `backdrop-blur-sm`, autocomplete attributes.
 
-- [ ] **3.1** Renk paleti & spacing standardı: Tailwind config'e custom color tokens ekle, semantik isimlerle (primary/success/warning/danger). Tüm sayfalarda aynı padding/gap (`p-4`, `gap-3` vs.) kullan.
-- [ ] **3.2** Dashboard kartlarını yeniden tasarla: ikon + büyük metrik + trend göstergesi (örn. bugünkü sipariş sayısı + dünden % değişim).
-- [ ] **3.3** Loading skeleton'ları ekle (şu an sadece spinner var). `Skeleton` component'i zaten mevcut, sayfalarda kullanılsın.
-- [ ] **3.4** Empty state'leri görsel hale getir: illüstrasyon/ikon + açıklama + CTA buton ("İlk siparişini oluştur").
-- [ ] **3.5** Toast'ların pozisyonunu mobile için top yerine bottom-center yap (mobile thumb zone). Sonner config.
-- [ ] **3.6** Form UX: inline validation hatası göster (kırmızı border + altında küçük metin), submit'te toast yerine.
-- [ ] **3.7** Tablolardan `Card`-based listelere geç (mobile için). Boss Inventory ve Orders sayfalarında.
-- [ ] **3.8** Bottom nav active state'ini iyileştir: ikon scale + renk + üstte küçük indicator.
-- [ ] **3.9** Dark mode geçiş animasyonu yumuşat, sistem teması default seç.
-- [ ] **3.10** Login sayfasını yeniden tasarla: gradient bg, daha iyi tipografi, brand logo alanı.
+**Deferred / future polish:** Dashboard trend % indicator (backend genişletmesi gerek); inline validation pattern'inin diğer formlara yayılması.
 
 ---
 

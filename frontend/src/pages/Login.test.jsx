@@ -42,11 +42,13 @@ describe("Login", () => {
     expect(screen.getByTestId("login-submit")).toBeInTheDocument();
   });
 
-  it("blocks submit when fields are empty and shows a toast error", async () => {
+  it("blocks submit when fields are empty and shows inline errors", async () => {
     const user = userEvent.setup();
     renderLogin();
     await user.click(screen.getByTestId("login-submit"));
-    expect(toastError).toHaveBeenCalledWith("Please fill in all fields");
+    expect(screen.getByText("Username is required")).toBeInTheDocument();
+    expect(screen.getByText("Password is required")).toBeInTheDocument();
+    expect(toastError).not.toHaveBeenCalled();
     expect(loginFn).not.toHaveBeenCalled();
   });
 

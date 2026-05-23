@@ -15,6 +15,7 @@ const Login = () => {
   const { resolvedTheme, toggleTheme } = useTheme();
   
   const [loginData, setLoginData] = useState({ username: '', password: '' });
+  const [errors, setErrors] = useState({ username: '', password: '' });
   const [loading, setLoading] = useState(false);
 
   // Redirect if already authenticated
@@ -43,23 +44,32 @@ const Login = () => {
 
   const handleLogin = async (e) => {
     e.preventDefault();
-    if (!loginData.username || !loginData.password) {
-      toast.error('Please fill in all fields');
-      return;
-    }
-    
+    // Inline validation: show errors under each field instead of a toast.
+    const next = {
+      username: loginData.username.trim() ? '' : 'Username is required',
+      password: loginData.password ? '' : 'Password is required',
+    };
+    setErrors(next);
+    if (next.username || next.password) return;
+
     setLoading(true);
     const result = await login(loginData.username, loginData.password);
     setLoading(false);
-    
+
     if (result.success) {
       // Redirect without toast
       setTimeout(() => {
         redirectByRole(result.user.role);
       }, 100);
     } else {
+      // Server-side error (bad credentials, rate limit) still surfaces as a toast.
       toast.error(result.error);
     }
+  };
+
+  const setField = (field, value) => {
+    setLoginData((prev) => ({ ...prev, [field]: value }));
+    if (errors[field]) setErrors((prev) => ({ ...prev, [field]: '' }));
   };
 
   return (
@@ -101,7 +111,7 @@ const Login = () => {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleLogin} className="space-y-4">
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <Label htmlFor="login-username">Username</Label>
               <Input
                 id="login-username"
@@ -109,11 +119,17 @@ const Login = () => {
                 placeholder="Enter your username"
                 autoComplete="username"
                 value={loginData.username}
-                onChange={(e) => setLoginData({ ...loginData, username: e.target.value })}
+                onChange={(e) => setField('username', e.target.value)}
+                aria-invalid={!!errors.username}
+                aria-describedby={errors.username ? "login-username-error" : undefined}
+                className={errors.username ? "border-destructive focus-visible:ring-destructive" : ""}
                 data-testid="login-username"
               />
+              {errors.username && (
+                <p id="login-username-error" className="text-xs text-destructive">{errors.username}</p>
+              )}
             </div>
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <Label htmlFor="login-password">Password</Label>
               <Input
                 id="login-password"
@@ -121,9 +137,15 @@ const Login = () => {
                 placeholder="Enter your password"
                 autoComplete="current-password"
                 value={loginData.password}
-                onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
+                onChange={(e) => setField('password', e.target.value)}
+                aria-invalid={!!errors.password}
+                aria-describedby={errors.password ? "login-password-error" : undefined}
+                className={errors.password ? "border-destructive focus-visible:ring-destructive" : ""}
                 data-testid="login-password"
               />
+              {errors.password && (
+                <p id="login-password-error" className="text-xs text-destructive">{errors.password}</p>
+              )}
             </div>
             <Button
               type="submit"
