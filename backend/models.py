@@ -155,8 +155,10 @@ class OrderCreate(BaseModel):
 
 
 class OrderUpdate(BaseModel):
+    # Status transitions must go through /complete or /cancel — those routes
+    # atomically gate on status=pending and restore stock correctly. Allowing
+    # status here would let callers bypass stock restoration on cancel.
     model_config = ConfigDict(use_enum_values=True)
-    status: Optional[OrderStatus] = None
     driver_id: Optional[str] = None
     driver_name: Optional[str] = None
 

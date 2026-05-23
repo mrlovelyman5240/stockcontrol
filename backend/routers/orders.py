@@ -158,9 +158,6 @@ async def update_order(
 
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
-    if update_data.get("status") == "completed":
-        update_data["completed_at"] = datetime.now(timezone.utc).isoformat()
-
     await db.orders.update_one({"id": order_id}, {"$set": update_data})
 
     updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
@@ -182,15 +179,21 @@ async def complete_order(
     if user["role"] == "driver" and existing.get("driver_id") != user["user_id"]:
         raise HTTPException(status_code=403, detail="You can only complete your own orders")
 
-    await db.orders.update_one(
-        {"id": order_id},
+    # Atomic pending→completed transition. If a concurrent /cancel or /delete already
+    # changed status, modified_count will be 0 and we reject — preventing a state where
+    # the order ends up completed while stock was restored by the racing cancel.
+    now = datetime.now(timezone.utc).isoformat()
+    result = await db.orders.update_one(
+        {"id": order_id, "status": "pending"},
         {"$set": {
             "status": "completed",
-            "completed_at": datetime.now(timezone.utc).isoformat(),
+            "completed_at": now,
             "completed_by": user["username"],
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": now,
         }},
     )
+    if result.modified_count == 0:
+        raise HTTPException(status_code=409, detail="Order is no longer pending")
 
     updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
     return Order(**updated)
@@ -208,9 +211,24 @@ async def cancel_order(
     if existing["status"] != "pending":
         raise HTTPException(status_code=400, detail="Only pending orders can be cancelled")
 
-    # Restore base stock for cancelled order using the units_per snapshotted on each
-    # OrderItem at creation time (so later variant changes can't drift the math).
-    # Free gifts included — they were deducted at creation.
+    # Atomic pending→cancelled transition. Only the winning request restores stock;
+    # a concurrent cancel/delete/complete that loses the race will see modified_count=0
+    # and exit without touching stock — preventing double restoration.
+    now = datetime.now(timezone.utc).isoformat()
+    result = await db.orders.update_one(
+        {"id": order_id, "status": "pending"},
+        {"$set": {
+            "status": "cancelled",
+            "cancelled_by": user["username"],
+            "cancelled_at": now,
+            "updated_at": now,
+        }},
+    )
+    if result.modified_count == 0:
+        raise HTTPException(status_code=409, detail="Order is no longer pending")
+
+    # Restore base stock using units_per snapshotted on each OrderItem at creation
+    # (so later variant changes can't drift the math). Free gifts included.
     for item in existing["items"]:
         units_per = int(item.get("units_per", 1)) or 1
         base_cost = item["quantity"] * units_per
@@ -218,16 +236,6 @@ async def cancel_order(
             {"id": item["item_id"]},
             {"$inc": {"stock": base_cost}},
         )
-
-    await db.orders.update_one(
-        {"id": order_id},
-        {"$set": {
-            "status": "cancelled",
-            "cancelled_by": user["username"],
-            "cancelled_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
-        }},
-    )
 
     updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
 
@@ -253,19 +261,26 @@ async def delete_order(
     if not existing:
         raise HTTPException(status_code=404, detail="Order not found")
 
-    # Restore base stock only for pending orders, using OrderItem.units_per snapshot.
-    # Cancelled orders already returned stock at cancellation; completed orders' goods
-    # have been delivered.
+    # For pending orders the delete is the authoritative state change — use a
+    # conditional delete so only one request restores stock if two arrive concurrently.
+    # Non-pending orders (cancelled/completed) just need the row gone; stock was
+    # already restored at cancellation or shipped on completion.
     if existing.get("status") == "pending":
-        for item in existing["items"]:
-            units_per = int(item.get("units_per", 1)) or 1
-            base_cost = item["quantity"] * units_per
-            await db.inventory.update_one(
-                {"id": item["item_id"]},
-                {"$inc": {"stock": base_cost}},
-            )
-
-    await db.orders.delete_one({"id": order_id})
+        deleted = await db.orders.delete_one({"id": order_id, "status": "pending"})
+        if deleted.deleted_count == 1:
+            for item in existing["items"]:
+                units_per = int(item.get("units_per", 1)) or 1
+                base_cost = item["quantity"] * units_per
+                await db.inventory.update_one(
+                    {"id": item["item_id"]},
+                    {"$inc": {"stock": base_cost}},
+                )
+        else:
+            # Lost the race to a concurrent cancel/complete/delete; just remove the row
+            # if it still exists, never restore stock here.
+            await db.orders.delete_one({"id": order_id})
+    else:
+        await db.orders.delete_one({"id": order_id})
 
     if user["role"] == "customer_service":
         await create_audit_log(
