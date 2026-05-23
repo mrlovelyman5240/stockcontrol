@@ -4,29 +4,25 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/ca
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
-import { Badge } from '../../components/ui/badge';
 import { ScrollArea } from '../../components/ui/scroll-area';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog';
 import { inventoryApi, ordersApi, usersApi } from '../../lib/api';
 import { formatCurrency, getApiErrorMessage } from '../../lib/utils';
 import { toast } from 'sonner';
 import DriverSelect from './new-order/DriverSelect';
 import GiftSelector from './new-order/GiftSelector';
+import ProductSearch from './new-order/ProductSearch';
+import VariantDialog from './new-order/VariantDialog';
 import {
   ShoppingCart,
   Plus,
   Minus,
   Trash2,
   Gift,
-  AlertTriangle,
   Loader2,
   Check,
-  Search,
   Truck,
   ShoppingBag,
-  MessageSquare,
-  Layers,
-  ChevronRight
+  MessageSquare
 } from 'lucide-react';
 
 const NewOrder = () => {
@@ -42,11 +38,9 @@ const NewOrder = () => {
   const [freeGiftId, setFreeGiftId] = useState('');
   const [cart, setCart] = useState([]);
 
-  // Variant selection state
+  // Variant dialog open state — selected variant + price live inside the dialog component
   const [variantDialogOpen, setVariantDialogOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
-  const [selectedVariant, setSelectedVariant] = useState(null);
-  const [customPrice, setCustomPrice] = useState('');
 
   useEffect(() => { fetchData(); }, []);
 
@@ -90,52 +84,30 @@ const NewOrder = () => {
     setFreeGiftId(key);
   };
 
-  // Product click handler — opens variant dialog or adds directly
   const handleProductClick = (item) => {
     const totalStock = getProductTotalStock(item);
     if (totalStock <= 0) {
       toast.error('Item is out of stock');
       return;
     }
-
-    if (item.variants?.length > 0) {
-      setSelectedProduct(item);
-      setSelectedVariant(null);
-      setCustomPrice('');
-      setVariantDialogOpen(true);
-    } else {
-      setSelectedProduct(item);
-      setSelectedVariant(null);
-      setCustomPrice(item.price.toString());
-      setVariantDialogOpen(true);
-    }
+    setSelectedProduct(item);
+    setVariantDialogOpen(true);
   };
 
-  const handleVariantSelect = (variant) => {
-    setSelectedVariant(variant);
-    setCustomPrice(variant.price.toString());
-  };
+  const handleAddToCartFromDialog = ({ product, variant, price }) => {
+    if (!product) return;
 
-  const handleAddToCartFromDialog = () => {
-    if (!selectedProduct) return;
-    const price = parseFloat(customPrice);
-    if (isNaN(price) || price < 0) {
-      toast.error('Please enter a valid price');
-      return;
-    }
-
-    const variantName = selectedVariant?.name || null;
-    const cartKey = `${selectedProduct.id}-${variantName || 'base'}-${price}`;
-    const existingIndex = cart.findIndex(c => 
-      c.item_id === selectedProduct.id && 
-      c.variant_name === variantName && 
+    const variantName = variant?.name || null;
+    const existingIndex = cart.findIndex(c =>
+      c.item_id === product.id &&
+      c.variant_name === variantName &&
       c.price === price &&
       !c.is_free_gift
     );
 
     if (existingIndex >= 0) {
       const newCart = [...cart];
-      const maxStock = selectedVariant ? (selectedVariant.stock ?? 0) : selectedProduct.stock;
+      const maxStock = variant ? (variant.stock ?? 0) : product.stock;
       if (newCart[existingIndex].quantity >= maxStock) {
         toast.error('Not enough stock');
         return;
@@ -143,11 +115,11 @@ const NewOrder = () => {
       newCart[existingIndex].quantity += 1;
       setCart(newCart);
     } else {
-      const displayName = variantName 
-        ? `${selectedProduct.name} (${variantName})`
-        : selectedProduct.name;
+      const displayName = variantName
+        ? `${product.name} (${variantName})`
+        : product.name;
       setCart([...cart, {
-        item_id: selectedProduct.id,
+        item_id: product.id,
         name: displayName,
         price,
         quantity: 1,
@@ -156,7 +128,7 @@ const NewOrder = () => {
       }]);
     }
 
-    toast.success(`Added to cart`);
+    toast.success('Added to cart');
     setVariantDialogOpen(false);
     setSelectedProduct(null);
   };
@@ -249,10 +221,6 @@ const NewOrder = () => {
       setSubmitting(false);
     }
   };
-
-  const filteredInventory = inventory.filter(item =>
-    item.name.toLowerCase().includes(search.toLowerCase())
-  );
 
   const paidItems = cart.filter(c => !c.is_free_gift);
 
@@ -350,150 +318,22 @@ const NewOrder = () => {
         </div>
       )}
 
-      {/* Compact Product Search */}
-      <div className="relative mb-3">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Search products..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="pl-10 h-10"
-          data-testid="search-products"
-        />
-      </div>
+      <ProductSearch
+        inventory={inventory}
+        search={search}
+        onSearchChange={setSearch}
+        onProductClick={handleProductClick}
+      />
 
-      {/* Compact Product List */}
-      <ScrollArea className="h-[220px] mb-4 border rounded-xl">
-        <div className="divide-y">
-          {filteredInventory.map((item) => {
-            const totalStock = getProductTotalStock(item);
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => handleProductClick(item)}
-                disabled={totalStock <= 0}
-                className={`w-full flex items-center justify-between px-3 py-2.5 text-left transition-colors ${
-                  totalStock <= 0 
-                    ? 'opacity-40 cursor-not-allowed' 
-                    : 'hover:bg-muted/60 active:bg-muted'
-                }`}
-                data-testid={`product-${item.id}`}
-              >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium text-sm truncate">{item.name}</span>
-                    {item.variants?.length > 0 && (
-                      <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0">
-                        <Layers className="h-2.5 w-2.5 mr-0.5" />
-                        {item.variants.length}
-                      </Badge>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 mt-0.5">
-                    {item.variants?.length > 0 ? (
-                      <span className="text-xs text-muted-foreground">
-                        {formatCurrency(Math.min(...item.variants.map(v => v.price)))} – {formatCurrency(Math.max(...item.variants.map(v => v.price)))}
-                      </span>
-                    ) : (
-                      <span className="text-xs font-medium">{formatCurrency(item.price)}</span>
-                    )}
-                    <span className={`text-xs ${totalStock <= 5 ? 'text-destructive' : 'text-muted-foreground'}`}>
-                      {totalStock <= 0 ? (
-                        <span className="flex items-center gap-0.5"><AlertTriangle className="h-3 w-3" /> Out</span>
-                      ) : `${totalStock} left`}
-                    </span>
-                  </div>
-                </div>
-                {totalStock > 0 && (
-                  <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0 ml-2" />
-                )}
-              </button>
-            );
-          })}
-          {filteredInventory.length === 0 && (
-            <div className="p-6 text-center text-muted-foreground text-sm">No products found</div>
-          )}
-        </div>
-      </ScrollArea>
-
-      {/* Variant/Price Selection Dialog */}
-      <Dialog open={variantDialogOpen} onOpenChange={setVariantDialogOpen}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="text-lg">{selectedProduct?.name}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 mt-2">
-            {/* Variant options */}
-            {selectedProduct?.variants?.length > 0 && (
-              <div className="space-y-2">
-                <Label className="text-sm text-muted-foreground">Select Variant</Label>
-                <div className="grid grid-cols-1 gap-2">
-                  {selectedProduct.variants.map((v, idx) => {
-                    const variantStock = v.stock ?? 0;
-                    const isOutOfStock = variantStock <= 0;
-                    return (
-                      <button
-                        key={idx}
-                        type="button"
-                        onClick={() => !isOutOfStock && handleVariantSelect(v)}
-                        disabled={isOutOfStock}
-                        className={`flex items-center justify-between p-3 rounded-lg border-2 transition-all text-left ${
-                          isOutOfStock
-                            ? 'opacity-40 cursor-not-allowed border-border bg-muted/30'
-                            : selectedVariant?.name === v.name
-                              ? 'border-primary bg-primary/5'
-                              : 'border-border hover:border-muted-foreground/40'
-                        }`}
-                        data-testid={`variant-option-${idx}`}
-                      >
-                        <div>
-                          <span className="font-medium text-sm">{v.name}</span>
-                          <span className={`ml-2 text-xs ${isOutOfStock ? 'text-destructive' : variantStock <= 5 ? 'text-amber-600' : 'text-muted-foreground'}`}>
-                            {isOutOfStock ? 'Out of stock' : `${variantStock} left`}
-                          </span>
-                        </div>
-                        <span className="text-sm font-semibold">{formatCurrency(v.price)}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Editable Price */}
-            <div className="space-y-2">
-              <Label htmlFor="custom-price" className="text-sm text-muted-foreground flex items-center justify-between">
-                <span>Price (editable for discounts)</span>
-              </Label>
-              <div className="flex items-center gap-2">
-                <span className="text-lg font-bold">$</span>
-                <Input
-                  id="custom-price"
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={customPrice}
-                  onChange={(e) => setCustomPrice(e.target.value)}
-                  className="h-12 text-lg font-semibold"
-                  data-testid="custom-price-input"
-                />
-              </div>
-            </div>
-
-            {/* Add to cart */}
-            <Button
-              className="w-full h-11"
-              onClick={handleAddToCartFromDialog}
-              disabled={!customPrice || (selectedProduct?.variants?.length > 0 && !selectedVariant)}
-              data-testid="add-to-cart-btn"
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add to Cart — {customPrice ? formatCurrency(parseFloat(customPrice) || 0) : '$0.00'}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <VariantDialog
+        open={variantDialogOpen}
+        product={selectedProduct}
+        onOpenChange={(open) => {
+          setVariantDialogOpen(open);
+          if (!open) setSelectedProduct(null);
+        }}
+        onAddToCart={handleAddToCartFromDialog}
+      />
 
       {/* Cart */}
       {cart.length > 0 && (
