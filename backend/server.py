@@ -7,7 +7,9 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, FastAPI
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.middleware.cors import CORSMiddleware
+from starlette.responses import JSONResponse
 
 from database import client, db
 from models import Settings
@@ -59,6 +61,38 @@ if not _cors_origins_raw:
     )
 _cors_origins = [origin.strip() for origin in _cors_origins_raw.split(',') if origin.strip()]
 
+class CSRFOriginMiddleware(BaseHTTPMiddleware):
+    """Reject state-changing requests whose Origin header is not in the allow list.
+
+    Background: switching auth to SameSite=None cookies means the browser will
+    auto-attach the session on cross-site requests. CORS `allow_credentials` plus
+    explicit origins blocks hostile JS from READING our responses, but it does
+    not stop the request from REACHING the server. Browsers reliably set
+    `Origin` on every cross-origin state-changing request, so checking that
+    header against the same allow list closes the CSRF window.
+
+    Requests with no Origin (curl, pytest's `requests`, server-to-server) pass
+    through — these are non-browser callers and not a CSRF vector.
+    """
+
+    def __init__(self, app, allowed_origins):
+        super().__init__(app)
+        self.allowed_origins = set(allowed_origins)
+
+    async def dispatch(self, request, call_next):
+        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+            origin = request.headers.get("origin")
+            if origin and origin not in self.allowed_origins:
+                return JSONResponse(
+                    {"detail": "Origin not allowed"},
+                    status_code=403,
+                )
+        return await call_next(request)
+
+
+# Order matters: CORS middleware runs first (handles preflight + sets response
+# headers), then our CSRF origin check rejects cross-site mutations.
+app.add_middleware(CSRFOriginMiddleware, allowed_origins=_cors_origins)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,

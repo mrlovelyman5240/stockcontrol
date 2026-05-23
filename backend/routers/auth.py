@@ -53,7 +53,6 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.post("/register", response_model=TokenResponse)
 async def register(
     user_data: UserCreate,
-    response: Response,
     _=Depends(require_role(["boss"])),
 ):
     # Only boss can create staff accounts. Boss itself is bootstrapped via env vars
@@ -76,8 +75,11 @@ async def register(
     }
     await db.users.insert_one(user_doc)
 
+    # Issue a token in the body for non-browser/API consumers, but DO NOT set the
+    # auth cookie here: register is invoked by a logged-in boss creating a staff
+    # account, and setting a cookie would swap the boss's browser session over to
+    # the newly created user (privilege confusion bug — Codex review HIGH).
     token = create_token(user_id, user_data.username, user_data.role)
-    _set_auth_cookie(response, token)
     return TokenResponse(
         access_token=token,
         user=UserResponse(
@@ -121,7 +123,9 @@ async def logout(response: Response):
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_me(user=Depends(get_current_user)):
+async def get_me(response: Response, user=Depends(get_current_user)):
+    # User-specific; never let a proxy / SW runtime cache leak this across sessions.
+    response.headers["Cache-Control"] = "no-store"
     user_doc = await db.users.find_one({"id": user["user_id"]}, {"_id": 0, "password": 0})
     if not user_doc:
         raise HTTPException(status_code=404, detail="User not found")

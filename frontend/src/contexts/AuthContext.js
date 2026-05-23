@@ -62,7 +62,14 @@ export const AuthProvider = ({ children }) => {
     try {
       await authApi.logout();
     } catch (error) {
-      // Logout should always succeed client-side even if the server is unreachable.
+      // Backend cookie clear failed — the HttpOnly cookie may persist until it
+      // expires (24h JWT lifetime). User is logged out client-side either way,
+      // but warn so this is visible in console for ops to follow up if it
+      // keeps happening.
+      console.warn(
+        "Logout request failed on server; the auth cookie may remain valid until expiry.",
+        error,
+      );
     } finally {
       setUser(null);
     }
