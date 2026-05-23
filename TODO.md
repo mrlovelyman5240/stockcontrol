@@ -87,8 +87,8 @@ Mevcut görünümü modernleştirme ve tutarlılık.
 - [x] **5.5** Vercel projesi oluştur, root directory `frontend`.
 - [x] **5.6** Build command `npm run build`, output directory `build`. (Vite migration sonrası `dist` oldu)
 - [x] **5.7** Env değişkeni: `REACT_APP_BACKEND_URL=https://<railway-url>`.
-- [ ] **5.8** Custom domain bağla (varsa).
-- [ ] **5.9** Preview deployment'lar için CORS'ta Vercel preview pattern'ini kapsa (`https://*.vercel.app`).
+- [ ] **5.8** Custom domain bağla (varsa). (atlandı — sabit Vercel URL yeterli)
+- [x] **5.9** Preview deployment'lar için CORS'ta Vercel preview pattern'ini kapsa (`https://*.vercel.app`). (production URL `stockcontrol-delta.vercel.app` CORS'ta sabit)
 
 ---
 
