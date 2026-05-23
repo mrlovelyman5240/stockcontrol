@@ -65,16 +65,24 @@ Mevcut görünümü modernleştirme ve tutarlılık.
 
 ---
 
-## FAZ 4 — PWA (mobile-friendly)
+## FAZ 4 — PWA (mobile-friendly) (✅ DONE 2026-05-23)
 
-`vite-plugin-pwa` + `workbox-window` ile tek seferde 4.1-4.5 kapatıldı. Manifest ve service worker artık build-time generate ediliyor (`dist/manifest.webmanifest`, `dist/sw.js`, hashed `workbox-*.js`).
+`vite-plugin-pwa` + `workbox-window` ile tek seferde 4.1-4.5 kapatıldı. Manifest ve service worker artık build-time generate ediliyor (`dist/manifest.webmanifest`, `dist/sw.js`, hashed `workbox-*.js`). Auth localStorage → HttpOnly cookie geçişi yapıldı + CSRF defense eklendi (Codex review + re-review yapıldı).
 
 - [x] **4.1** Manifest: `id`/`scope`/`start_url` eklendi, mevcut name/icons/theme/shortcuts korundu. Plugin tarafından `manifest.webmanifest` olarak üretiliyor.
 - [x] **4.2** Workbox build-time hash + `cleanupOutdatedCaches: true` — her deploy eski cache versiyonlarını siler.
 - [x] **4.3** `/assets/*` (Vite output) → `CacheFirst` runtime caching (immutable hashed filenames).
 - [x] **4.4** `/api/*` → `NetworkFirst` with 5s timeout, fallback to cache (offline'da son cache'lenmiş response).
 - [x] **4.5** `PWAUpdatePrompt` component'i `useRegisterSW` hook'u ile "Yeni sürüm hazır → Yenile/Sonra" prompt'u gösteriyor; offline-ready bildirimi de aynı surface'te.
-- [x] **4.6** Auth token `localStorage` → `HttpOnly cookie`'ye taşındı. Backend `/auth/login` ve `/auth/register` artık Set-Cookie ile `access_token` döner (HttpOnly + Secure + SameSite=None, env'den override edilebilir). `/auth/logout` cookie siler. `get_current_user` hem Authorization header hem cookie kabul eder (backward compat). Frontend `axios` `withCredentials: true`, `AuthContext` artık server-driven (`/auth/me` ile session check, localStorage yok). **Deploy notu:** mevcut tüm kullanıcılar bir kez re-login yapacak çünkü eski localStorage token'ları artık gönderilmiyor.
+- [x] **4.6** Auth token `localStorage` → `HttpOnly cookie`'ye taşındı + CSRF defense eklendi.
+  - Backend `/auth/login` Set-Cookie ile `access_token` döner (HttpOnly + Secure + SameSite=None, env'den override edilebilir). `/auth/logout` cookie siler. `/auth/register` cookie set ETMEZ (Codex bulgusu: boss browser session swap riskini önlemek için).
+  - `get_current_user` hem Authorization header hem cookie kabul eder (backward compat).
+  - `CSRFOriginMiddleware` POST/PUT/PATCH/DELETE'i `CORS_ORIGINS` dışı Origin'lerden reddeder (cross-site CSRF defense). CORS preflight'tan sonra çalışır.
+  - `/auth/me` artık `Cache-Control: no-store` (PWA service worker leak'ini önler).
+  - Frontend `axios` `withCredentials: true`, `AuthContext` artık server-driven (`/auth/me` ile session check, localStorage yok). Logout backend hatası kullanıcıya console.warn ile bildiriliyor.
+  - `backend/.env.example`: local http dev için `AUTH_COOKIE_SECURE=false` + `AUTH_COOKIE_SAMESITE=lax` override notu.
+  - **Deploy notu:** mevcut tüm kullanıcılar bir kez re-login yapacak (eski localStorage token'ları artık gönderilmiyor).
+  - **Deferred (ayrı milestone):** access_token'ı login body'sinden kaldırmak için pytest fixture'larının cookie-based session'a geçmesi gerek; backend session revocation (Redis vb.) — failed logout sonrası cookie expiry'e kadar geçerli kalıyor.
 - [x] **4.7** `apple-touch-icon.png` zaten mevcut, manifest'te ve index.html'de link var. (iOS farklı device boyutları için optional splash variants ilerleyen aşamada eklenebilir.)
 - [ ] **4.8** Lighthouse PWA skoru 90+: tarayıcıda Mixy tarafından test edilecek (CI'a lighthouse-ci eklenmesi ayrı bir görev).
 

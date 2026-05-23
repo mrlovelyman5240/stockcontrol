@@ -1,0 +1,543 @@
+﻿commit b1b372df70064993d8c355cdb647896fa59fb1d3
+Author: mrlovelyman5240 <mrlovelyman5240@gmail.com>
+Date:   Sat May 23 19:40:34 2026 +1000
+
+    [faz4 chunk3] auth review fixes: register no cookie, CSRF origin middleware, no-store, dev env doc
+    
+    Codex auth review findings:
+    HIGH
+    - /auth/register no longer sets the auth cookie. Boss creating staff used to swap
+      the boss's own browser session over to the new account (privilege confusion).
+      Body still returns access_token for non-browser callers; the boss stays logged
+      in as boss.
+    - CSRFOriginMiddleware rejects POST/PUT/PATCH/DELETE whose Origin header is not
+      in CORS_ORIGINS. Closes the cross-site CSRF window opened by SameSite=None
+      cookies. Non-browser callers (no Origin header) are unaffected — they aren't
+      a CSRF vector. Mounted BEFORE CORSMiddleware so preflight still works.
+    
+    MEDIUM
+    - /auth/me returns Cache-Control: no-store so service worker / proxy can't leak
+      user identity across sessions.
+    - AuthContext.logout now console.warns on backend failure (cookie may persist
+      until JWT expiry) instead of swallowing silently.
+    
+    LOW / docs
+    - backend/.env.example documents AUTH_COOKIE_SECURE + AUTH_COOKIE_SAMESITE
+      override for local http dev (production stays Secure + None for cross-site
+      Vercel↔Railway).
+    
+    Deferred (separate work):
+    - Drop access_token from login body once the test suite migrates to cookie-based
+      session (currently test_security_fixes reads body for Bearer header)
+    - Backend session revocation list (would let logout invalidate cookie server-side)
+
+diff --git a/backend/routers/auth.py b/backend/routers/auth.py
+index 92f6f91..bdf3d3d 100644
+--- a/backend/routers/auth.py
++++ b/backend/routers/auth.py
+@@ -53,7 +53,6 @@ router = APIRouter(prefix="/auth", tags=["auth"])
+ @router.post("/register", response_model=TokenResponse)
+ async def register(
+     user_data: UserCreate,
+-    response: Response,
+     _=Depends(require_role(["boss"])),
+ ):
+     # Only boss can create staff accounts. Boss itself is bootstrapped via env vars
+@@ -76,8 +75,11 @@ async def register(
+     }
+     await db.users.insert_one(user_doc)
+ 
++    # Issue a token in the body for non-browser/API consumers, but DO NOT set the
++    # auth cookie here: register is invoked by a logged-in boss creating a staff
++    # account, and setting a cookie would swap the boss's browser session over to
++    # the newly created user (privilege confusion bug — Codex review HIGH).
+     token = create_token(user_id, user_data.username, user_data.role)
+-    _set_auth_cookie(response, token)
+     return TokenResponse(
+         access_token=token,
+         user=UserResponse(
+@@ -121,7 +123,9 @@ async def logout(response: Response):
+ 
+ 
+ @router.get("/me", response_model=UserResponse)
+-async def get_me(user=Depends(get_current_user)):
++async def get_me(response: Response, user=Depends(get_current_user)):
++    # User-specific; never let a proxy / SW runtime cache leak this across sessions.
++    response.headers["Cache-Control"] = "no-store"
+     user_doc = await db.users.find_one({"id": user["user_id"]}, {"_id": 0, "password": 0})
+     if not user_doc:
+         raise HTTPException(status_code=404, detail="User not found")
+diff --git a/backend/server.py b/backend/server.py
+index 80150bb..5f69d95 100644
+--- a/backend/server.py
++++ b/backend/server.py
+@@ -7,7 +7,9 @@ from datetime import datetime, timezone
+ from fastapi import APIRouter, FastAPI
+ from slowapi import _rate_limit_exceeded_handler
+ from slowapi.errors import RateLimitExceeded
++from starlette.middleware.base import BaseHTTPMiddleware
+ from starlette.middleware.cors import CORSMiddleware
++from starlette.responses import JSONResponse
+ 
+ from database import client, db
+ from models import Settings
+@@ -59,6 +61,38 @@ if not _cors_origins_raw:
+     )
+ _cors_origins = [origin.strip() for origin in _cors_origins_raw.split(',') if origin.strip()]
+ 
++class CSRFOriginMiddleware(BaseHTTPMiddleware):
++    """Reject state-changing requests whose Origin header is not in the allow list.
++
++    Background: switching auth to SameSite=None cookies means the browser will
++    auto-attach the session on cross-site requests. CORS `allow_credentials` plus
++    explicit origins blocks hostile JS from READING our responses, but it does
++    not stop the request from REACHING the server. Browsers reliably set
++    `Origin` on every cross-origin state-changing request, so checking that
++    header against the same allow list closes the CSRF window.
++
++    Requests with no Origin (curl, pytest's `requests`, server-to-server) pass
++    through — these are non-browser callers and not a CSRF vector.
++    """
++
++    def __init__(self, app, allowed_origins):
++        super().__init__(app)
++        self.allowed_origins = set(allowed_origins)
++
++    async def dispatch(self, request, call_next):
++        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
++            origin = request.headers.get("origin")
++            if origin and origin not in self.allowed_origins:
++                return JSONResponse(
++                    {"detail": "Origin not allowed"},
++                    status_code=403,
++                )
++        return await call_next(request)
++
++
++# Order matters: CORS middleware runs first (handles preflight + sets response
++# headers), then our CSRF origin check rejects cross-site mutations.
++app.add_middleware(CSRFOriginMiddleware, allowed_origins=_cors_origins)
+ app.add_middleware(
+     CORSMiddleware,
+     allow_credentials=True,
+diff --git a/frontend/src/contexts/AuthContext.js b/frontend/src/contexts/AuthContext.js
+index 1947831..5670600 100644
+--- a/frontend/src/contexts/AuthContext.js
++++ b/frontend/src/contexts/AuthContext.js
+@@ -62,7 +62,14 @@ export const AuthProvider = ({ children }) => {
+     try {
+       await authApi.logout();
+     } catch (error) {
+-      // Logout should always succeed client-side even if the server is unreachable.
++      // Backend cookie clear failed — the HttpOnly cookie may persist until it
++      // expires (24h JWT lifetime). User is logged out client-side either way,
++      // but warn so this is visible in console for ops to follow up if it
++      // keeps happening.
++      console.warn(
++        "Logout request failed on server; the auth cookie may remain valid until expiry.",
++        error,
++      );
+     } finally {
+       setUser(null);
+     }
+diff --git a/three-brain-out/2026-05-23-auth-cookie-review/codex-review.md b/three-brain-out/2026-05-23-auth-cookie-review/codex-review.md
+new file mode 100644
+index 0000000..d58b5da
+Binary files /dev/null and b/three-brain-out/2026-05-23-auth-cookie-review/codex-review.md differ
+diff --git a/three-brain-out/2026-05-23-auth-cookie-review/diff.txt b/three-brain-out/2026-05-23-auth-cookie-review/diff.txt
+new file mode 100644
+index 0000000..c3482b1
+--- /dev/null
++++ b/three-brain-out/2026-05-23-auth-cookie-review/diff.txt
+@@ -0,0 +1,391 @@
++﻿commit 4d9d456329dcde38934d676b10238c1899b3cf63
++Author: mrlovelyman5240 <mrlovelyman5240@gmail.com>
++Date:   Sat May 23 19:36:06 2026 +1000
++
++    [faz4 chunk2] auth token: localStorage -> HttpOnly cookie (XSS hardening)
++    
++    Backend:
++    - security.py: get_current_user accepts EITHER Authorization header OR access_token
++      cookie; HTTPBearer auto_error=False to allow cookie fallback
++    - security.py: AUTH_COOKIE_NAME + AUTH_COOKIE_SECURE/SAMESITE env-tunable
++    - auth.py /login + /register: set HttpOnly Secure SameSite=None cookie; body still
++      carries access_token for any non-browser client / test
++    - auth.py: new POST /auth/logout clears the cookie
++    
++    Frontend:
++    - lib/api.js: axios withCredentials: true; drop Bearer interceptor; logout() helper
++    - AuthContext: no more localStorage; verifyAuth() pings /auth/me on mount to learn
++      whether the browser still has a session; logout() calls backend then clears user
++    - All previous useAuth() consumers (logout buttons, isAuthenticated guards) work
++      unchanged; no consumer was reading the old  field
++    
++    Tests: AuthContext.test rewired to mock authApi.me instead of axios; 7/7 passing.
++    Build + backend compile clean.
++    
++    Deploy note: every existing user re-logs in once (old localStorage tokens are no
++    longer sent). Closes TODO 4.6.
++
++diff --git a/TODO.md b/TODO.md
++index cbfc7e4..62f9b4f 100644
++--- a/TODO.md
+++++ b/TODO.md
++@@ -74,7 +74,7 @@ Mevcut görünümü modernleştirme ve tutarlılık.
++ - [x] **4.3** `/assets/*` (Vite output) → `CacheFirst` runtime caching (immutable hashed filenames).
++ - [x] **4.4** `/api/*` → `NetworkFirst` with 5s timeout, fallback to cache (offline'da son cache'lenmiş response).
++ - [x] **4.5** `PWAUpdatePrompt` component'i `useRegisterSW` hook'u ile "Yeni sürüm hazır → Yenile/Sonra" prompt'u gösteriyor; offline-ready bildirimi de aynı surface'te.
++-- [ ] **4.6** Auth token'ı `localStorage` → `HttpOnly cookie`'ye taşı (XSS koruması). Backend `Set-Cookie` döndürsün, frontend `credentials: 'include'` kullansın. (Ayrı chunk — backend + frontend coordinated change.)
+++- [x] **4.6** Auth token `localStorage` → `HttpOnly cookie`'ye taşındı. Backend `/auth/login` ve `/auth/register` artık Set-Cookie ile `access_token` döner (HttpOnly + Secure + SameSite=None, env'den override edilebilir). `/auth/logout` cookie siler. `get_current_user` hem Authorization header hem cookie kabul eder (backward compat). Frontend `axios` `withCredentials: true`, `AuthContext` artık server-driven (`/auth/me` ile session check, localStorage yok). **Deploy notu:** mevcut tüm kullanıcılar bir kez re-login yapacak çünkü eski localStorage token'ları artık gönderilmiyor.
++ - [x] **4.7** `apple-touch-icon.png` zaten mevcut, manifest'te ve index.html'de link var. (iOS farklı device boyutları için optional splash variants ilerleyen aşamada eklenebilir.)
++ - [ ] **4.8** Lighthouse PWA skoru 90+: tarayıcıda Mixy tarafından test edilecek (CI'a lighthouse-ci eklenmesi ayrı bir görev).
++ 
++diff --git a/backend/routers/auth.py b/backend/routers/auth.py
++index 184a83c..92f6f91 100644
++--- a/backend/routers/auth.py
+++++ b/backend/routers/auth.py
++@@ -2,7 +2,7 @@
++ import uuid
++ from datetime import datetime, timezone
++ 
++-from fastapi import APIRouter, Depends, HTTPException, Request
+++from fastapi import APIRouter, Depends, HTTPException, Request, Response
++ 
++ from database import db
++ from models import (
++@@ -14,6 +14,10 @@ from models import (
++ )
++ from rate_limit import limiter
++ from security import (
+++    AUTH_COOKIE_MAX_AGE_SECONDS,
+++    AUTH_COOKIE_NAME,
+++    AUTH_COOKIE_SAMESITE,
+++    AUTH_COOKIE_SECURE,
++     create_token,
++     get_current_user,
++     hash_password,
++@@ -21,11 +25,37 @@ from security import (
++     verify_password,
++ )
++ 
+++
+++def _set_auth_cookie(response: Response, token: str) -> None:
+++    """HttpOnly cookie shields the token from JS — XSS can't read it."""
+++    response.set_cookie(
+++        key=AUTH_COOKIE_NAME,
+++        value=token,
+++        max_age=AUTH_COOKIE_MAX_AGE_SECONDS,
+++        httponly=True,
+++        secure=AUTH_COOKIE_SECURE,
+++        samesite=AUTH_COOKIE_SAMESITE,
+++        path="/",
+++    )
+++
+++
+++def _clear_auth_cookie(response: Response) -> None:
+++    response.delete_cookie(
+++        key=AUTH_COOKIE_NAME,
+++        path="/",
+++        secure=AUTH_COOKIE_SECURE,
+++        samesite=AUTH_COOKIE_SAMESITE,
+++    )
+++
++ router = APIRouter(prefix="/auth", tags=["auth"])
++ 
++ 
++ @router.post("/register", response_model=TokenResponse)
++-async def register(user_data: UserCreate, _=Depends(require_role(["boss"]))):
+++async def register(
+++    user_data: UserCreate,
+++    response: Response,
+++    _=Depends(require_role(["boss"])),
+++):
++     # Only boss can create staff accounts. Boss itself is bootstrapped via env vars
++     # (INITIAL_BOSS_USERNAME / INITIAL_BOSS_PASSWORD), not through this endpoint.
++     existing = await db.users.find_one({"username": user_data.username}, {"_id": 0})
++@@ -47,6 +77,7 @@ async def register(user_data: UserCreate, _=Depends(require_role(["boss"]))):
++     await db.users.insert_one(user_doc)
++ 
++     token = create_token(user_id, user_data.username, user_data.role)
+++    _set_auth_cookie(response, token)
++     return TokenResponse(
++         access_token=token,
++         user=UserResponse(
++@@ -61,12 +92,13 @@ async def register(user_data: UserCreate, _=Depends(require_role(["boss"]))):
++ 
++ @router.post("/login", response_model=TokenResponse)
++ @limiter.limit("5/minute")
++-async def login(request: Request, credentials: UserLogin):
+++async def login(request: Request, credentials: UserLogin, response: Response):
++     user = await db.users.find_one({"username": credentials.username}, {"_id": 0})
++     if not user or not verify_password(credentials.password, user["password"]):
++         raise HTTPException(status_code=401, detail="Invalid credentials")
++ 
++     token = create_token(user["id"], user["username"], user["role"])
+++    _set_auth_cookie(response, token)
++     return TokenResponse(
++         access_token=token,
++         user=UserResponse(
++@@ -79,6 +111,15 @@ async def login(request: Request, credentials: UserLogin):
++     )
++ 
++ 
+++@router.post("/logout")
+++async def logout(response: Response):
+++    """Clear the auth cookie. Frontends using bearer tokens just drop the token
+++    client-side and don't need to call this, but it's the canonical signal for
+++    cookie-based sessions."""
+++    _clear_auth_cookie(response)
+++    return {"message": "Logged out"}
+++
+++
++ @router.get("/me", response_model=UserResponse)
++ async def get_me(user=Depends(get_current_user)):
++     user_doc = await db.users.find_one({"id": user["user_id"]}, {"_id": 0, "password": 0})
++diff --git a/backend/security.py b/backend/security.py
++index 45623f3..6d7fba6 100644
++--- a/backend/security.py
+++++ b/backend/security.py
++@@ -5,12 +5,23 @@ from typing import List
++ 
++ import bcrypt
++ import jwt
++-from fastapi import Depends, HTTPException
+++from fastapi import Cookie, Depends, HTTPException
++ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+++from typing import Optional
++ 
++ from database import db
++ from models import AuditLog
++ 
+++# Cookie name used by login/logout endpoints and accepted by get_current_user
+++# as an alternative to the Authorization header.
+++AUTH_COOKIE_NAME = "access_token"
+++
+++# Cookie attributes. Defaults are production-safe (HTTPS + cross-site). Override
+++# via env for local dev over plain http.
+++AUTH_COOKIE_SECURE = os.environ.get("AUTH_COOKIE_SECURE", "true").lower() == "true"
+++AUTH_COOKIE_SAMESITE = os.environ.get("AUTH_COOKIE_SAMESITE", "none").lower()
+++AUTH_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24  # matches JWT expiration
+++
++ JWT_SECRET = os.environ.get('JWT_SECRET')
++ if not JWT_SECRET:
++     raise RuntimeError(
++@@ -20,7 +31,9 @@ if not JWT_SECRET:
++ JWT_ALGORITHM = "HS256"
++ JWT_EXPIRATION_HOURS = 24
++ 
++-security = HTTPBearer()
+++# auto_error=False so the dependency can fall back to the cookie when no
+++# Authorization header is present (without raising 403 first).
+++security = HTTPBearer(auto_error=False)
++ 
++ 
++ def hash_password(password: str) -> str:
++@@ -41,9 +54,16 @@ def create_token(user_id: str, username: str, role: str) -> str:
++     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
++ 
++ 
++-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+++async def get_current_user(
+++    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+++    access_token: Optional[str] = Cookie(default=None, alias=AUTH_COOKIE_NAME),
+++):
+++    # Prefer Authorization header (legacy clients, test suites); fall back to
+++    # the HttpOnly cookie set by /auth/login on the new frontend flow.
+++    token = credentials.credentials if credentials else access_token
+++    if not token:
+++        raise HTTPException(status_code=401, detail="Not authenticated")
++     try:
++-        token = credentials.credentials
++         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
++         return payload
++     except jwt.ExpiredSignatureError:
++diff --git a/frontend/src/contexts/AuthContext.js b/frontend/src/contexts/AuthContext.js
++index 3fe2222..1947831 100644
++--- a/frontend/src/contexts/AuthContext.js
+++++ b/frontend/src/contexts/AuthContext.js
++@@ -1,39 +1,21 @@
++ import { createContext, useContext, useState, useEffect, useCallback } from 'react';
++-import axios from 'axios';
+++import { authApi } from '../lib/api';
++ 
++ const AuthContext = createContext(null);
++ 
++-const API_URL = import.meta.env.REACT_APP_BACKEND_URL;
++-
+++// Auth state is server-driven: the HttpOnly auth cookie set by /auth/login is
+++// the source of truth, JS can't read it, so on every mount we ping /auth/me to
+++// learn whether the browser still has a valid session. No tokens in localStorage.
++ export const AuthProvider = ({ children }) => {
++   const [user, setUser] = useState(null);
++-  const [token, setToken] = useState(localStorage.getItem('token'));
++   const [loading, setLoading] = useState(true);
++ 
++-  useEffect(() => {
++-    if (token) {
++-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
++-    } else {
++-      delete axios.defaults.headers.common['Authorization'];
++-    }
++-  }, [token]);
++-
++   const verifyAuth = useCallback(async () => {
++-    const storedToken = localStorage.getItem('token');
++-    if (!storedToken) {
++-      setLoading(false);
++-      return;
++-    }
++     try {
++-      axios.defaults.headers.common['Authorization'] = `Bearer ${storedToken}`;
++-      const response = await axios.get(`${API_URL}/api/auth/me`);
+++      const response = await authApi.me();
++       setUser(response.data);
++-      setToken(storedToken);
++     } catch (error) {
++-      localStorage.removeItem('token');
++-      setToken(null);
++       setUser(null);
++-      delete axios.defaults.headers.common['Authorization'];
++     } finally {
++       setLoading(false);
++     }
++@@ -43,7 +25,7 @@ export const AuthProvider = ({ children }) => {
++ 
++   const refreshUser = async () => {
++     try {
++-      const response = await axios.get(`${API_URL}/api/auth/me`);
+++      const response = await authApi.me();
++       setUser(response.data);
++     } catch (error) {
++       console.error('Failed to refresh user:', error);
++@@ -52,13 +34,10 @@ export const AuthProvider = ({ children }) => {
++ 
++   const login = async (username, password) => {
++     try {
++-      const response = await axios.post(`${API_URL}/api/auth/login`, { username, password });
++-      const { access_token, user: userData } = response.data;
++-      localStorage.setItem('token', access_token);
++-      axios.defaults.headers.common['Authorization'] = `Bearer ${access_token}`;
++-      setToken(access_token);
++-      setUser(userData);
++-      return { success: true, user: userData };
+++      const response = await authApi.login(username, password);
+++      // Backend Set-Cookie carries the session; we only keep user profile in state.
+++      setUser(response.data.user);
+++      return { success: true, user: response.data.user };
++     } catch (error) {
++       const detail = error.response?.data?.detail;
++       const message = typeof detail === 'string' ? detail : (Array.isArray(detail) && detail[0]?.msg) || 'Login failed';
++@@ -68,8 +47,8 @@ export const AuthProvider = ({ children }) => {
++ 
++   const createUser = async (username, password, role, fullName) => {
++     try {
++-      const response = await axios.post(`${API_URL}/api/auth/register`, {
++-        username, password, role, full_name: fullName || username
+++      const response = await authApi.register({
+++        username, password, role, full_name: fullName || username,
++       });
++       return { success: true, user: response.data.user };
++     } catch (error) {
++@@ -79,19 +58,22 @@ export const AuthProvider = ({ children }) => {
++     }
++   };
++ 
++-  const logout = () => {
++-    localStorage.removeItem('token');
++-    setToken(null);
++-    setUser(null);
++-    delete axios.defaults.headers.common['Authorization'];
+++  const logout = async () => {
+++    try {
+++      await authApi.logout();
+++    } catch (error) {
+++      // Logout should always succeed client-side even if the server is unreachable.
+++    } finally {
+++      setUser(null);
+++    }
++   };
++ 
++   const value = {
++-    user, token, loading, login, createUser, logout, refreshUser,
++-    isAuthenticated: !!user && !!token,
+++    user, loading, login, createUser, logout, refreshUser,
+++    isAuthenticated: !!user,
++     isBoss: user?.role === 'boss',
++     isCustomerService: user?.role === 'customer_service',
++-    isDriver: user?.role === 'driver'
+++    isDriver: user?.role === 'driver',
++   };
++ 
++   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
++diff --git a/frontend/src/contexts/AuthContext.test.jsx b/frontend/src/contexts/AuthContext.test.jsx
++index b577a0f..fd2a3ae 100644
++--- a/frontend/src/contexts/AuthContext.test.jsx
+++++ b/frontend/src/contexts/AuthContext.test.jsx
++@@ -2,11 +2,13 @@ import { describe, it, expect, vi } from "vitest";
++ import { render } from "@testing-library/react";
++ import { AuthProvider, useAuth } from "./AuthContext";
++ 
++-vi.mock("axios", () => ({
++-  default: {
++-    defaults: { headers: { common: {} } },
++-    get: vi.fn(() => Promise.reject(new Error("no token"))),
++-    post: vi.fn(),
+++// Auth state now comes from /auth/me (HttpOnly cookie); reject means no session.
+++vi.mock("../lib/api", () => ({
+++  authApi: {
+++    me: vi.fn(() => Promise.reject(new Error("not authenticated"))),
+++    login: vi.fn(),
+++    logout: vi.fn(),
+++    register: vi.fn(),
++   },
++ }));
++ 
++@@ -33,7 +35,7 @@ describe("AuthContext", () => {
++     errSpy.mockRestore();
++   });
++ 
++-  it("starts unauthenticated when no token is stored", async () => {
+++  it("starts unauthenticated when /auth/me rejects (no cookie)", async () => {
++     const { findByTestId } = render(
++       <AuthProvider>
++         <Probe />
++diff --git a/frontend/src/lib/api.js b/frontend/src/lib/api.js
++index 25e58ef..cb14c43 100644
++--- a/frontend/src/lib/api.js
+++++ b/frontend/src/lib/api.js
++@@ -2,23 +2,17 @@ import axios from 'axios';
++ 
++ const API_URL = import.meta.env.REACT_APP_BACKEND_URL;
++ 
+++// withCredentials lets the browser send/receive the HttpOnly auth cookie that
+++// /auth/login sets. Cookie replaces the old localStorage token (XSS hardening).
++ const api = axios.create({
++   baseURL: `${API_URL}/api`,
++-});
++-
++-api.interceptors.request.use((config) => {
++-  const token = localStorage.getItem('token');
++-  if (token) {
++-    config.headers.Authorization = `Bearer ${token}`;
++-  }
++-  return config;
+++  withCredentials: true,
++ });
++ 
++ api.interceptors.response.use(
++   (response) => response,
++   (error) => {
++-    if (error.response?.status === 401) {
++-      localStorage.removeItem('token');
+++    if (error.response?.status === 401 && window.location.pathname !== '/login') {
++       window.location.href = '/login';
++     }
++     return Promise.reject(error);
++@@ -27,6 +21,7 @@ api.interceptors.response.use(
++ 
++ export const authApi = {
++   login: (username, password) => api.post('/auth/login', { username, password }),
+++  logout: () => api.post('/auth/logout'),
++   register: (data) => api.post('/auth/register', data),
++   me: () => api.get('/auth/me'),
++   changePassword: (current_password, new_password) => api.put('/auth/password', { current_password, new_password }),
