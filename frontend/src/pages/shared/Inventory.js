@@ -7,6 +7,7 @@ import { Badge } from '../../components/ui/badge';
 import { ScrollArea } from '../../components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '../../components/ui/dialog';
 import { inventoryApi } from '../../lib/api';
+import EmptyState from '../../components/EmptyState';
 import { formatCurrency } from '../../lib/utils';
 import { toast } from 'sonner';
 import {
@@ -251,10 +252,11 @@ const Inventory = ({ role = 'boss' }) => {
       <ScrollArea className="h-[calc(100vh-280px)]">
         <div className="space-y-2">
           {filteredInventory.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
-              <Package className="h-12 w-12 mx-auto mb-3 opacity-50" />
-              <p>No items found</p>
-            </div>
+            <EmptyState
+              icon={Package}
+              title={search ? "No matches" : "No items yet"}
+              description={search ? "Try a different search term." : "Add your first product to start taking orders."}
+            />
           ) : (
             filteredInventory.map((item) => {
               const totalStock = getItemTotalStock(item);

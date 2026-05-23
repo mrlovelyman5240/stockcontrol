@@ -6,6 +6,7 @@ import { Badge } from '../../components/ui/badge';
 import { ScrollArea } from '../../components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { ordersApi } from '../../lib/api';
+import EmptyState from '../../components/EmptyState';
 import { formatCurrency, formatDateTime, getStatusColor, getStatusLabel, getOrderBorderColor, getOrderTypeBadge, getApiErrorMessage } from '../../lib/utils';
 import { toast } from 'sonner';
 import { 
@@ -144,10 +145,11 @@ const ServiceOrders = () => {
       <ScrollArea className="h-[calc(100vh-280px)]">
         <div className="space-y-3">
           {sortedOrders.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
-              <Package className="h-12 w-12 mx-auto mb-3 opacity-50" />
-              <p>No orders found</p>
-            </div>
+            <EmptyState
+              icon={Package}
+              title="No orders found"
+              description="No orders match the current filters."
+            />
           ) : (
             sortedOrders.map((order) => (
               <Card

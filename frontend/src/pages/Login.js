@@ -63,12 +63,18 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-background">
-      {/* Theme toggle */}
+    <div className="min-h-screen flex flex-col items-center justify-center p-4 relative overflow-hidden bg-background">
+      {/* Decorative gradient background — subtle, theme-aware */}
+      <div
+        aria-hidden
+        className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_top,hsl(var(--primary)/0.15),transparent_50%),radial-gradient(ellipse_at_bottom_right,hsl(var(--accent)/0.10),transparent_60%)]"
+      />
+
       <button
         onClick={toggleTheme}
         className="absolute top-4 right-4 p-2 rounded-lg hover:bg-muted transition-colors"
         data-testid="theme-toggle"
+        aria-label="Toggle theme"
       >
         {resolvedTheme === 'dark' ? (
           <Sun className="h-5 w-5" />
@@ -77,19 +83,21 @@ const Login = () => {
         )}
       </button>
 
-      {/* Logo */}
-      <div className="flex items-center gap-3 mb-8">
-        <img src="/logo.png" alt="Mixy Logistics" className="h-12 w-12 rounded-xl object-cover" />
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Mixy Logistics</h1>
-          <p className="text-sm text-muted-foreground">Delivery Management</p>
+      {/* Brand */}
+      <div className="flex flex-col items-center gap-3 mb-10">
+        <div className="h-16 w-16 rounded-2xl bg-primary/10 ring-1 ring-primary/20 flex items-center justify-center shadow-sm">
+          <img src="/logo.png" alt="" className="h-12 w-12 rounded-xl object-cover" />
+        </div>
+        <div className="text-center">
+          <h1 className="text-3xl font-extrabold tracking-tight">Mixy Logistics</h1>
+          <p className="text-sm text-muted-foreground mt-1">Delivery Management</p>
         </div>
       </div>
 
-      <Card className="w-full max-w-md">
-        <CardHeader className="text-center">
-          <CardTitle>Welcome</CardTitle>
-          <CardDescription>Sign in to your account</CardDescription>
+      <Card className="w-full max-w-md shadow-lg border-border/60 backdrop-blur-sm bg-card/95">
+        <CardHeader className="text-center pb-4">
+          <CardTitle className="text-xl">Welcome back</CardTitle>
+          <CardDescription>Sign in to continue</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleLogin} className="space-y-4">
@@ -99,6 +107,7 @@ const Login = () => {
                 id="login-username"
                 type="text"
                 placeholder="Enter your username"
+                autoComplete="username"
                 value={loginData.username}
                 onChange={(e) => setLoginData({ ...loginData, username: e.target.value })}
                 data-testid="login-username"
@@ -110,14 +119,15 @@ const Login = () => {
                 id="login-password"
                 type="password"
                 placeholder="Enter your password"
+                autoComplete="current-password"
                 value={loginData.password}
                 onChange={(e) => setLoginData({ ...loginData, password: e.target.value })}
                 data-testid="login-password"
               />
             </div>
-            <Button 
-              type="submit" 
-              className="w-full h-12" 
+            <Button
+              type="submit"
+              className="w-full h-12 text-base font-semibold"
               disabled={loading}
               data-testid="login-submit"
             >
