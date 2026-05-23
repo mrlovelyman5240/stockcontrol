@@ -259,7 +259,7 @@ function App() {
         <BrowserRouter>
           <AppRoutes />
           <Toaster
-            position="top-center"
+            position="bottom-center"
             richColors
             closeButton
             toastOptions={{
