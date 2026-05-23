@@ -370,24 +370,25 @@ class TestSettings:
         data = response.json()
         assert "payment_method" in data
         assert "hourly_rate" in data
-        assert "per_package_rate" in data
-    
+        assert "per_delivery_rate" in data
+        assert "per_pickup_rate" in data
+
     def test_update_settings_as_boss(self, api_client, boss_token):
         """Test boss can update settings"""
         response = api_client.put(
             f"{BASE_URL}/api/settings",
-            json={"per_package_rate": 5.0},
+            json={"per_delivery_rate": 5.0},
             headers={"Authorization": f"Bearer {boss_token}"}
         )
         assert response.status_code == 200
         data = response.json()
-        assert data["per_package_rate"] == 5.0
-    
+        assert data["per_delivery_rate"] == 5.0
+
     def test_update_settings_forbidden_for_service(self, api_client, service_token):
         """Test customer service cannot update settings"""
         response = api_client.put(
             f"{BASE_URL}/api/settings",
-            json={"per_package_rate": 10.0},
+            json={"per_delivery_rate": 10.0},
             headers={"Authorization": f"Bearer {service_token}"}
         )
         assert response.status_code == 403
