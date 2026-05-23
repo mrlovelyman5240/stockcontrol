@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../../compo
 import { formatCurrency } from '../../../lib/utils';
 import { Plus } from 'lucide-react';
 
-const VariantDialog = ({ open, product, onOpenChange, onAddToCart }) => {
+const VariantDialog = ({ open, product, onOpenChange, onAddToCart, getRemaining }) => {
   const [selectedVariant, setSelectedVariant] = useState(null);
   const [customPrice, setCustomPrice] = useState('');
 
@@ -51,7 +51,8 @@ const VariantDialog = ({ open, product, onOpenChange, onAddToCart }) => {
               <div className="grid grid-cols-1 gap-2">
                 {product.variants.map((v, idx) => {
                   const unitsPer = Math.max(1, v.units_per ?? 1);
-                  const variantStock = Math.floor((product.stock ?? 0) / unitsPer);
+                  const remaining = getRemaining ? getRemaining(product.id) : (product.stock ?? 0);
+                  const variantStock = Math.floor(remaining / unitsPer);
                   const isOutOfStock = variantStock <= 0;
                   return (
                     <button

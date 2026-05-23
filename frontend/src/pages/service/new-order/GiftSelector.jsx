@@ -7,9 +7,8 @@ import { ScrollArea } from '../../../components/ui/scroll-area';
 import { Popover, PopoverContent, PopoverTrigger } from '../../../components/ui/popover';
 import { Gift, Search, Check, ChevronRight, ChevronsUpDown } from 'lucide-react';
 
-const getProductTotalStock = (item) => item.stock ?? 0;
-
-const GiftSelector = ({ inventory, freeGiftId, selectedGiftOption, onSelect, onClear }) => {
+const GiftSelector = ({ inventory, freeGiftId, selectedGiftOption, onSelect, onClear, getRemaining }) => {
+  const remainingFor = (item) => (getRemaining ? getRemaining(item.id) : (item.stock ?? 0));
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [expandedProduct, setExpandedProduct] = useState(null);
@@ -37,8 +36,7 @@ const GiftSelector = ({ inventory, freeGiftId, selectedGiftOption, onSelect, onC
   };
 
   const giftProducts = inventory.filter(item => {
-    const totalStock = getProductTotalStock(item);
-    if (totalStock <= 0) return false;
+    if (remainingFor(item) <= 0) return false;
     if (!search) return true;
     return item.name.toLowerCase().includes(search.toLowerCase());
   });
@@ -124,14 +122,14 @@ const GiftSelector = ({ inventory, freeGiftId, selectedGiftOption, onSelect, onC
                       </Badge>
                     )}
                     {!hasVariants && (
-                      <span className="text-xs text-muted-foreground shrink-0 ml-1">{item.stock} left</span>
+                      <span className="text-xs text-muted-foreground shrink-0 ml-1">{remainingFor(item)} left</span>
                     )}
                   </button>
                   {hasVariants && isExpanded && (
                     <div className="bg-muted/40 border-t border-b">
                       {item.variants.map((v, vIdx) => {
                         const unitsPer = Math.max(1, v.units_per ?? 1);
-                        const vStock = Math.floor((item.stock ?? 0) / unitsPer);
+                        const vStock = Math.floor(remainingFor(item) / unitsPer);
                         const isOutOfStock = vStock <= 0;
                         const isSelected = freeGiftId === `${item.id}:::${v.name}`;
                         return (

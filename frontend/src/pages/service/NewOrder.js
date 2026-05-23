@@ -55,7 +55,36 @@ const NewOrder = () => {
     }
   };
 
-  const getProductTotalStock = (item) => item.stock ?? 0;
+  // Resolve units_per for a (product, variantName) pair. Non-variant lines = 1.
+  const variantUnitsPer = (product, variantName) => {
+    if (!variantName || !product?.variants?.length) return 1;
+    const v = product.variants.find(vv => vv.name === variantName);
+    return Math.max(1, v?.units_per ?? 1);
+  };
+
+  // Total base-stock units already committed for a product across the entire cart
+  // plus the selected free gift. Used to compute remaining base stock so the UI
+  // and the add/update guards match what the backend will actually accept.
+  const baseConsumedForProduct = (productId, excludeCartIndex = null) => {
+    const invItem = inventory.find(i => i.id === productId);
+    if (!invItem) return 0;
+    let consumed = 0;
+    cart.forEach((line, idx) => {
+      if (idx === excludeCartIndex) return;
+      if (line.item_id !== productId || line.is_free_gift) return;
+      consumed += line.quantity * variantUnitsPer(invItem, line.variant_name);
+    });
+    if (selectedGiftOption && selectedGiftOption.item_id === productId) {
+      consumed += variantUnitsPer(invItem, selectedGiftOption.variant_name);
+    }
+    return consumed;
+  };
+
+  const remainingBaseStock = (productId, excludeCartIndex = null) => {
+    const invItem = inventory.find(i => i.id === productId);
+    if (!invItem) return 0;
+    return Math.max(0, (invItem.stock ?? 0) - baseConsumedForProduct(productId, excludeCartIndex));
+  };
 
   // Derive the selected gift label from freeGiftId
   const selectedGiftOption = (() => {
@@ -72,13 +101,17 @@ const NewOrder = () => {
   })();
 
   const handleGiftSelect = (itemId, variantName) => {
+    const invItem = inventory.find(i => i.id === itemId);
+    if (invItem && remainingBaseStock(itemId) < variantUnitsPer(invItem, variantName)) {
+      toast.error('Not enough stock for this gift');
+      return;
+    }
     const key = variantName ? `${itemId}:::${variantName}` : itemId;
     setFreeGiftId(key);
   };
 
   const handleProductClick = (item) => {
-    const totalStock = getProductTotalStock(item);
-    if (totalStock <= 0) {
+    if (remainingBaseStock(item.id) <= 0) {
       toast.error('Item is out of stock');
       return;
     }
@@ -90,6 +123,12 @@ const NewOrder = () => {
     if (!product) return;
 
     const variantName = variant?.name || null;
+    const unitsPer = variantUnitsPer(product, variantName);
+    if (remainingBaseStock(product.id) < unitsPer) {
+      toast.error('Not enough stock');
+      return;
+    }
+
     const existingIndex = cart.findIndex(c =>
       c.item_id === product.id &&
       c.variant_name === variantName &&
@@ -99,12 +138,6 @@ const NewOrder = () => {
 
     if (existingIndex >= 0) {
       const newCart = [...cart];
-      const unitsPer = variant ? Math.max(1, variant.units_per ?? 1) : 1;
-      const maxStock = Math.floor((product.stock ?? 0) / unitsPer);
-      if (newCart[existingIndex].quantity >= maxStock) {
-        toast.error('Not enough stock');
-        return;
-      }
       newCart[existingIndex].quantity += 1;
       setCart(newCart);
     } else {
@@ -137,15 +170,10 @@ const NewOrder = () => {
       return;
     }
     if (inventoryItem) {
-      let maxStock;
-      if (item.variant_name && inventoryItem.variants?.length > 0) {
-        const variant = inventoryItem.variants.find(v => v.name === item.variant_name);
-        const unitsPer = Math.max(1, variant?.units_per ?? 1);
-        maxStock = Math.floor((inventoryItem.stock ?? 0) / unitsPer);
-      } else {
-        maxStock = inventoryItem.stock ?? 0;
-      }
-      if (newQty > maxStock) {
+      const unitsPer = variantUnitsPer(inventoryItem, item.variant_name);
+      // Recompute base consumption excluding this line, then see if newQty fits.
+      const otherConsumed = baseConsumedForProduct(item.item_id, index);
+      if (otherConsumed + newQty * unitsPer > (inventoryItem.stock ?? 0)) {
         toast.error('Not enough stock');
         return;
       }
@@ -157,8 +185,6 @@ const NewOrder = () => {
   const removeFromCart = (index) => {
     setCart(cart.filter((_, i) => i !== index));
   };
-
-  const calculateTotal = () => cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
 
   const buildOrderItems = () => {
     const items = [...cart];
@@ -199,7 +225,6 @@ const NewOrder = () => {
       await ordersApi.create({
         address: notes.trim(),
         items: buildOrderItems(),
-        total: calculateTotal(),
         order_type: orderType,
         driver_id: selectedDriver,
         driver_name: driver.username
@@ -291,6 +316,7 @@ const NewOrder = () => {
           selectedGiftOption={selectedGiftOption}
           onSelect={handleGiftSelect}
           onClear={() => setFreeGiftId('')}
+          getRemaining={remainingBaseStock}
         />
       </div>
 
@@ -312,6 +338,7 @@ const NewOrder = () => {
         search={search}
         onSearchChange={setSearch}
         onProductClick={handleProductClick}
+        getRemaining={remainingBaseStock}
       />
 
       <VariantDialog
@@ -322,6 +349,7 @@ const NewOrder = () => {
           if (!open) setSelectedProduct(null);
         }}
         onAddToCart={handleAddToCartFromDialog}
+        getRemaining={remainingBaseStock}
       />
 
       <Cart

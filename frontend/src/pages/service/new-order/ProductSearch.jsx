@@ -4,10 +4,7 @@ import { ScrollArea } from '../../../components/ui/scroll-area';
 import { formatCurrency } from '../../../lib/utils';
 import { AlertTriangle, Search, Layers, ChevronRight } from 'lucide-react';
 
-// Base stock is the source of truth — variants only describe consumption per sale.
-const getProductTotalStock = (item) => item.stock ?? 0;
-
-const ProductSearch = ({ inventory, search, onSearchChange, onProductClick }) => {
+const ProductSearch = ({ inventory, search, onSearchChange, onProductClick, getRemaining }) => {
   const filtered = inventory.filter(item =>
     item.name.toLowerCase().includes(search.toLowerCase())
   );
@@ -28,7 +25,7 @@ const ProductSearch = ({ inventory, search, onSearchChange, onProductClick }) =>
       <ScrollArea className="h-[220px] mb-4 border rounded-xl">
         <div className="divide-y">
           {filtered.map((item) => {
-            const totalStock = getProductTotalStock(item);
+            const totalStock = getRemaining(item.id);
             return (
               <button
                 key={item.id}
