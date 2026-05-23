@@ -2,8 +2,11 @@
 
 > Bu dosya oturumlar arası ilerlemeyi takip eder. Her görev tamamlanınca `[ ]` → `[x]` yapılır ve commit'lenir. Bir sonraki oturum bu dosyayı okuyarak nerede kaldığımızı bilir.
 
-**Son güncelleme:** 2026-05-21
-**Audit raporu:** `three-brain-out/2026-05-20-full-audit/`
+**Son güncelleme:** 2026-05-23
+**Audit raporları:**
+- `three-brain-out/2026-05-20-full-audit/`
+- `three-brain-out/2026-05-23-base-stock-review/` (Codex review of base-stock ch3+ch4)
+- `three-brain-out/2026-05-23-base-stock-rereview/` (Codex re-review of ch5-ch8)
 
 ---
 
@@ -89,6 +92,27 @@ Mevcut görünümü modernleştirme ve tutarlılık.
 - [x] **5.7** Env değişkeni: `REACT_APP_BACKEND_URL=https://<railway-url>`.
 - [ ] **5.8** Custom domain bağla (varsa). (atlandı — sabit Vercel URL yeterli)
 - [x] **5.9** Preview deployment'lar için CORS'ta Vercel preview pattern'ini kapsa (`https://*.vercel.app`). (production URL `stockcontrol-delta.vercel.app` CORS'ta sabit)
+
+---
+
+## FAZ 7 — BASE-STOCK MODELİ (✅ DONE 2026-05-23)
+
+Eski model: her `ItemVariant`'ın kendi `stock` field'ı var, sipariş direkt variant'tan düşürür.
+Yeni model: tek `product.stock` (base stock). Variant'ta sadece `units_per` (default 1). Sipariş `qty * units_per` kadar base'den düşürür. `OrderItem.units_per` snapshot'ı iptal/silme'de doğru restore için kullanılır.
+
+- [x] **7.1** Backend: `ItemVariant.units_per` + `OrderItem.units_per` snapshot eklendi. Sipariş atomik `$inc` ile base stock düşürür, rollback prior deduction (ch1, commit `1365196`).
+- [x] **7.2** Frontend Inventory form: base stock üstte, variant'lar `units_per` ile (ch2, commit `edec8b0`).
+- [x] **7.3** Frontend NewOrder akışı + child component'lar (ProductSearch/VariantDialog/GiftSelector/parent): tüm `variant.stock` referansları kaldırıldı, `floor(stock/units_per)` kullanıldı (ch3, commit `db87999`).
+- [x] **7.4** Test suite yeniden yazıldı: eski `test_variant_stock_tracking.py` silindi, yerine `test_base_stock_tracking.py` (356 satır, snapshot integrity testi dahil) — ch4, commit `0647bc6`.
+- [x] **7.5** 🔴 CRITICAL atomic state transitions: `cancel_order` / `complete_order` / `delete_order` artık `update_one({id, status: pending})` ile koşullu — eşzamanlı double-restore race kapandı. `OrderUpdate`'ten `status` kaldırıldı, generic PUT artık stock bypass edemez (ch5, commit `b410e50`).
+- [x] **7.6** 🟠 HIGH cart-aware base stock: `baseConsumedForProduct` + `remainingBaseStock` helper'ları sepet + free gift'i ortak havuza karşı sayar. Add/+1/gift handler'ları base'e karşı gate'lenir. Client'tan gönderilen `total` field'ı kaldırıldı — backend zaten yeniden hesaplıyor (ch6, commit `5dad724`).
+- [x] **7.7** 🟡 MEDIUM data integrity: `_resolve_units_per` strict (null=1 default, geri kalan int>=1 değilse 400). `ItemVariant.stock` model'den kaldırıldı (`extra="ignore"` eski DB docs için tolerant). Frontend `variantUnitsPer` invalid'de `null` döner, dialog'lar "Data error" göster (ch7, commit `2eb0026`).
+- [x] **7.8** 9 yeni test: delete snapshot integrity, multi-line shared pool + partial rollback, exact boundary, free-gift deduct/restore, units_per corruption (ch8, commit `18b9926`).
+- [x] **7.9** 🟠 Re-review fix: cancel/delete'te `_resolve_units_per` artık state transition'dan ÖNCE çalışır (partial transition bug'u kapandı). Bool reddi eklendi (`int(True)` masking riski). `updateQuantity` `unitsPer===null` guard. Free gift delete testi + non-variant multi-line testi eklendi (ch9, commit `7a99e10`).
+
+**Notlar:**
+- Codex review: 15 bulgu yakalandı, ch5-8'de kapatıldı. Re-review: 2 HIGH (ch5+ch7 etkileşimi) + minor concerns, ch9'da kapatıldı.
+- Audit dosyaları: `three-brain-out/2026-05-23-base-stock-*/`.
 
 ---
 
