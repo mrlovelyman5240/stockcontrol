@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
+import LoadingScreen from '../../components/LoadingScreen';
 import { Card, CardContent } from '../../components/ui/card';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -142,13 +143,7 @@ const Inventory = ({ role = 'boss' }) => {
     item.name.toLowerCase().includes(search.toLowerCase())
   );
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
+  if (loading) return <LoadingScreen />;
 
   return (
     <div className="p-4 max-w-2xl mx-auto" data-testid={`${role}-inventory`}>
@@ -207,7 +202,7 @@ const Inventory = ({ role = 'boss' }) => {
 
                 {formData.variants.length === 0 ? (
                   <div className="space-y-3 p-3 rounded-lg border border-dashed">
-                    <p className="text-xs text-muted-foreground">No variants — single product with one price. Each sale removes 1 from base stock.</p>
+                    <p className="text-xs text-muted-foreground">No variants â€” single product with one price. Each sale removes 1 from base stock.</p>
                     <div className="space-y-1">
                       <Label className="text-sm">Price ($)</Label>
                       <Input type="number" step="0.01" min="0" value={formData.price} onChange={(e) => setFormData({ ...formData, price: e.target.value })} placeholder="0.00" data-testid="item-price-input" />

@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
+import LoadingScreen from '../../components/LoadingScreen';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { Card, CardContent } from '../../components/ui/card';
@@ -43,13 +44,7 @@ const DriverDashboard = () => {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
+  if (loading) return <LoadingScreen variant="cards" />;
 
   return (
     <div className="p-4 max-w-2xl mx-auto" data-testid="driver-dashboard">
@@ -82,8 +77,8 @@ const DriverDashboard = () => {
           <p className="money-large">{formatCurrency(stats?.earnings || 0)}</p>
           <p className="text-sm opacity-80 mt-2">
             {stats?.payment_method === 'hourly' 
-              ? `${stats?.hours_logged || 0} hours × ${formatCurrency(stats?.hourly_rate || 0)}/hr`
-              : `${stats?.packages_delivered || 0} deliveries × ${formatCurrency(stats?.per_package_rate || 0)}/pkg`
+              ? `${stats?.hours_logged || 0} hours Ã— ${formatCurrency(stats?.hourly_rate || 0)}/hr`
+              : `${stats?.packages_delivered || 0} deliveries Ã— ${formatCurrency(stats?.per_package_rate || 0)}/pkg`
             }
           </p>
         </CardContent>

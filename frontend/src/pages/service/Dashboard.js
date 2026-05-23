@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
+import LoadingScreen from '../../components/LoadingScreen';
 import { useAuth } from '../../contexts/AuthContext';
 import { useTheme } from '../../contexts/ThemeContext';
 import { Card, CardContent } from '../../components/ui/card';
@@ -69,13 +70,7 @@ const ServiceDashboard = () => {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
+  if (loading) return <LoadingScreen variant="cards" />;
 
   return (
     <div className="p-4 max-w-2xl mx-auto" data-testid="service-dashboard">
@@ -174,7 +169,7 @@ const ServiceDashboard = () => {
             <p className={`text-3xl font-bold ${stats.lowStock > 0 ? 'text-destructive' : ''}`}>
               {stats.lowStock}
             </p>
-            <p className="text-xs text-muted-foreground">items ≤ 5 units</p>
+            <p className="text-xs text-muted-foreground">items â‰¤ 5 units</p>
           </CardContent>
         </Card>
       </div>

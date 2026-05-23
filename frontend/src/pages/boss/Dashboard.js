@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+﻿import { useState, useEffect } from 'react';
+import LoadingScreen from '../../components/LoadingScreen';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
@@ -49,13 +50,7 @@ const BossDashboard = () => {
     navigate(`/boss/ledger?driver_id=${driverId}&tab=history`);
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-      </div>
-    );
-  }
+  if (loading) return <LoadingScreen variant="cards" />;
 
   const pendingPaymentsCount = stats?.pending_payments?.length || 0;
 
@@ -207,7 +202,7 @@ const BossDashboard = () => {
                   <div>
                     <p className="font-semibold">{item.driver_name}</p>
                     <p className="text-sm text-muted-foreground">
-                      Sales: {formatCurrency(item.total_sales)} · Earnings: {formatCurrency(item.driver_earnings)}
+                      Sales: {formatCurrency(item.total_sales)} Â· Earnings: {formatCurrency(item.driver_earnings)}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
