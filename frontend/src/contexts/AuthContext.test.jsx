@@ -2,11 +2,13 @@ import { describe, it, expect, vi } from "vitest";
 import { render } from "@testing-library/react";
 import { AuthProvider, useAuth } from "./AuthContext";
 
-vi.mock("axios", () => ({
-  default: {
-    defaults: { headers: { common: {} } },
-    get: vi.fn(() => Promise.reject(new Error("no token"))),
-    post: vi.fn(),
+// Auth state now comes from /auth/me (HttpOnly cookie); reject means no session.
+vi.mock("../lib/api", () => ({
+  authApi: {
+    me: vi.fn(() => Promise.reject(new Error("not authenticated"))),
+    login: vi.fn(),
+    logout: vi.fn(),
+    register: vi.fn(),
   },
 }));
 
@@ -33,7 +35,7 @@ describe("AuthContext", () => {
     errSpy.mockRestore();
   });
 
-  it("starts unauthenticated when no token is stored", async () => {
+  it("starts unauthenticated when /auth/me rejects (no cookie)", async () => {
     const { findByTestId } = render(
       <AuthProvider>
         <Probe />

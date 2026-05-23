@@ -2,7 +2,7 @@
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from database import db
 from models import (
@@ -14,6 +14,10 @@ from models import (
 )
 from rate_limit import limiter
 from security import (
+    AUTH_COOKIE_MAX_AGE_SECONDS,
+    AUTH_COOKIE_NAME,
+    AUTH_COOKIE_SAMESITE,
+    AUTH_COOKIE_SECURE,
     create_token,
     get_current_user,
     hash_password,
@@ -21,11 +25,37 @@ from security import (
     verify_password,
 )
 
+
+def _set_auth_cookie(response: Response, token: str) -> None:
+    """HttpOnly cookie shields the token from JS — XSS can't read it."""
+    response.set_cookie(
+        key=AUTH_COOKIE_NAME,
+        value=token,
+        max_age=AUTH_COOKIE_MAX_AGE_SECONDS,
+        httponly=True,
+        secure=AUTH_COOKIE_SECURE,
+        samesite=AUTH_COOKIE_SAMESITE,
+        path="/",
+    )
+
+
+def _clear_auth_cookie(response: Response) -> None:
+    response.delete_cookie(
+        key=AUTH_COOKIE_NAME,
+        path="/",
+        secure=AUTH_COOKIE_SECURE,
+        samesite=AUTH_COOKIE_SAMESITE,
+    )
+
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 @router.post("/register", response_model=TokenResponse)
-async def register(user_data: UserCreate, _=Depends(require_role(["boss"]))):
+async def register(
+    user_data: UserCreate,
+    response: Response,
+    _=Depends(require_role(["boss"])),
+):
     # Only boss can create staff accounts. Boss itself is bootstrapped via env vars
     # (INITIAL_BOSS_USERNAME / INITIAL_BOSS_PASSWORD), not through this endpoint.
     existing = await db.users.find_one({"username": user_data.username}, {"_id": 0})
@@ -47,6 +77,7 @@ async def register(user_data: UserCreate, _=Depends(require_role(["boss"]))):
     await db.users.insert_one(user_doc)
 
     token = create_token(user_id, user_data.username, user_data.role)
+    _set_auth_cookie(response, token)
     return TokenResponse(
         access_token=token,
         user=UserResponse(
@@ -61,12 +92,13 @@ async def register(user_data: UserCreate, _=Depends(require_role(["boss"]))):
 
 @router.post("/login", response_model=TokenResponse)
 @limiter.limit("5/minute")
-async def login(request: Request, credentials: UserLogin):
+async def login(request: Request, credentials: UserLogin, response: Response):
     user = await db.users.find_one({"username": credentials.username}, {"_id": 0})
     if not user or not verify_password(credentials.password, user["password"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     token = create_token(user["id"], user["username"], user["role"])
+    _set_auth_cookie(response, token)
     return TokenResponse(
         access_token=token,
         user=UserResponse(
@@ -77,6 +109,15 @@ async def login(request: Request, credentials: UserLogin):
             created_at=user["created_at"],
         ),
     )
+
+
+@router.post("/logout")
+async def logout(response: Response):
+    """Clear the auth cookie. Frontends using bearer tokens just drop the token
+    client-side and don't need to call this, but it's the canonical signal for
+    cookie-based sessions."""
+    _clear_auth_cookie(response)
+    return {"message": "Logged out"}
 
 
 @router.get("/me", response_model=UserResponse)

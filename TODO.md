@@ -74,7 +74,7 @@ Mevcut görünümü modernleştirme ve tutarlılık.
 - [x] **4.3** `/assets/*` (Vite output) → `CacheFirst` runtime caching (immutable hashed filenames).
 - [x] **4.4** `/api/*` → `NetworkFirst` with 5s timeout, fallback to cache (offline'da son cache'lenmiş response).
 - [x] **4.5** `PWAUpdatePrompt` component'i `useRegisterSW` hook'u ile "Yeni sürüm hazır → Yenile/Sonra" prompt'u gösteriyor; offline-ready bildirimi de aynı surface'te.
-- [ ] **4.6** Auth token'ı `localStorage` → `HttpOnly cookie`'ye taşı (XSS koruması). Backend `Set-Cookie` döndürsün, frontend `credentials: 'include'` kullansın. (Ayrı chunk — backend + frontend coordinated change.)
+- [x] **4.6** Auth token `localStorage` → `HttpOnly cookie`'ye taşındı. Backend `/auth/login` ve `/auth/register` artık Set-Cookie ile `access_token` döner (HttpOnly + Secure + SameSite=None, env'den override edilebilir). `/auth/logout` cookie siler. `get_current_user` hem Authorization header hem cookie kabul eder (backward compat). Frontend `axios` `withCredentials: true`, `AuthContext` artık server-driven (`/auth/me` ile session check, localStorage yok). **Deploy notu:** mevcut tüm kullanıcılar bir kez re-login yapacak çünkü eski localStorage token'ları artık gönderilmiyor.
 - [x] **4.7** `apple-touch-icon.png` zaten mevcut, manifest'te ve index.html'de link var. (iOS farklı device boyutları için optional splash variants ilerleyen aşamada eklenebilir.)
 - [ ] **4.8** Lighthouse PWA skoru 90+: tarayıcıda Mixy tarafından test edilecek (CI'a lighthouse-ci eklenmesi ayrı bir görev).
 

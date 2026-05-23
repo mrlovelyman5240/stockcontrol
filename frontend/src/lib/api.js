@@ -2,23 +2,17 @@ import axios from 'axios';
 
 const API_URL = import.meta.env.REACT_APP_BACKEND_URL;
 
+// withCredentials lets the browser send/receive the HttpOnly auth cookie that
+// /auth/login sets. Cookie replaces the old localStorage token (XSS hardening).
 const api = axios.create({
   baseURL: `${API_URL}/api`,
-});
-
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
+  withCredentials: true,
 });
 
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem('token');
+    if (error.response?.status === 401 && window.location.pathname !== '/login') {
       window.location.href = '/login';
     }
     return Promise.reject(error);
@@ -27,6 +21,7 @@ api.interceptors.response.use(
 
 export const authApi = {
   login: (username, password) => api.post('/auth/login', { username, password }),
+  logout: () => api.post('/auth/logout'),
   register: (data) => api.post('/auth/register', data),
   me: () => api.get('/auth/me'),
   changePassword: (current_password, new_password) => api.put('/auth/password', { current_password, new_password }),
