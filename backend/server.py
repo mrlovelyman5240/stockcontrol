@@ -1,39 +1,27 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends, status, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from dotenv import load_dotenv
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Request
 from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 import os
 import logging
-from pathlib import Path
-from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional
 import uuid
-from datetime import datetime, timezone, timedelta
-from enum import Enum
-import jwt
-import bcrypt
+from datetime import datetime, timezone
+from typing import List, Optional
 
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
-
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
-
-# JWT Configuration
-JWT_SECRET = os.environ.get('JWT_SECRET')
-if not JWT_SECRET:
-    raise RuntimeError(
-        "JWT_SECRET environment variable is required. "
-        "Set it to a long random string (e.g. `openssl rand -hex 32`)."
-    )
-JWT_ALGORITHM = "HS256"
-JWT_EXPIRATION_HOURS = 24
+from database import client, db
+from models import (
+    UserRole, OrderStatus, OrderType, PaymentStatus, PaymentMethod,
+    UserBase, UserCreate, UserLogin, PasswordChange, ResetPasswordRequest,
+    UserResponse, TokenResponse, ItemVariant, InventoryItem, InventoryCreate,
+    InventoryUpdate, OrderItem, Order, OrderCreate, OrderUpdate,
+    Payment, PaymentCreate, DriverHours, DriverHoursCreate,
+    Settings, SettingsUpdate, AuditLog,
+)
+from security import (
+    hash_password, verify_password, create_token,
+    get_current_user, require_role, create_audit_log,
+)
 
 # Create the main app
 app = FastAPI(title="Mixy Logistics API")
@@ -45,237 +33,6 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Create router with /api prefix
 api_router = APIRouter(prefix="/api")
-
-security = HTTPBearer()
-
-# ============== MODELS ==============
-
-class UserRole(str, Enum):
-    boss = "boss"
-    customer_service = "customer_service"
-    driver = "driver"
-
-class OrderStatus(str, Enum):
-    pending = "pending"
-    completed = "completed"
-    cancelled = "cancelled"
-
-class OrderType(str, Enum):
-    delivery = "delivery"
-    pickup = "pickup"
-
-class PaymentStatus(str, Enum):
-    pending = "pending"
-    approved = "approved"
-    rejected = "rejected"
-
-class PaymentMethod(str, Enum):
-    hourly = "hourly"
-    per_package = "per_package"
-
-class UserBase(BaseModel):
-    model_config = ConfigDict(use_enum_values=True)
-    username: str
-    full_name: Optional[str] = None
-    role: UserRole
-
-class UserCreate(UserBase):
-    password: str
-
-class UserLogin(BaseModel):
-    username: str
-    password: str
-
-class PasswordChange(BaseModel):
-    current_password: str
-    new_password: str
-
-class ResetPasswordRequest(BaseModel):
-    new_password: str
-
-class UserResponse(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str
-    username: str
-    full_name: Optional[str] = None
-    role: UserRole
-    created_at: str
-
-class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-    user: UserResponse
-
-class ItemVariant(BaseModel):
-    name: str  # e.g., "Small", "Large", "Family Size"
-    price: float = Field(ge=0)
-    stock: int = Field(default=0, ge=0)  # Variant-specific stock
-
-class InventoryItem(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    name: str
-    price: float = Field(ge=0)  # Default/base price (first variant price or standalone)
-    stock: int = Field(ge=0)
-    variants: List[ItemVariant] = []  # Empty = single-price item
-    bogo_enabled: bool = False
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-class InventoryCreate(BaseModel):
-    name: str
-    price: float = Field(ge=0)
-    stock: int = Field(ge=0)
-    variants: List[ItemVariant] = []
-    bogo_enabled: bool = False
-
-class InventoryUpdate(BaseModel):
-    name: Optional[str] = None
-    price: Optional[float] = Field(default=None, ge=0)
-    stock: Optional[int] = Field(default=None, ge=0)
-    variants: Optional[List[ItemVariant]] = None
-    bogo_enabled: Optional[bool] = None
-
-class OrderItem(BaseModel):
-    item_id: str
-    name: str
-    price: float
-    quantity: int
-    variant_name: Optional[str] = None  # Which variant was selected
-    is_free_gift: bool = False
-
-class Order(BaseModel):
-    model_config = ConfigDict(extra="ignore", use_enum_values=True)
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    address: str  # Also used as customer notes/instructions
-    notes: Optional[str] = None  # Unified customer notes
-    items: List[OrderItem]
-    total: float
-    order_type: OrderType = OrderType.delivery
-    status: OrderStatus = OrderStatus.pending
-    driver_id: Optional[str] = None
-    driver_name: Optional[str] = None
-    created_by: str
-    created_by_name: str
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    delivered_at: Optional[str] = None
-
-class OrderCreate(BaseModel):
-    model_config = ConfigDict(use_enum_values=True)
-    address: str  # Customer notes / instructions
-    items: List[OrderItem]
-    order_type: OrderType = OrderType.delivery
-    driver_id: str  # Required - must assign driver at creation
-    driver_name: str
-
-class OrderUpdate(BaseModel):
-    model_config = ConfigDict(use_enum_values=True)
-    status: Optional[OrderStatus] = None
-    driver_id: Optional[str] = None
-    driver_name: Optional[str] = None
-
-class Payment(BaseModel):
-    model_config = ConfigDict(extra="ignore", use_enum_values=True)
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    driver_id: str
-    driver_name: str
-    amount: float
-    status: PaymentStatus = PaymentStatus.pending
-    submitted_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    approved_at: Optional[str] = None
-    approved_by: Optional[str] = None
-
-class PaymentCreate(BaseModel):
-    amount: float = Field(gt=0)
-
-class DriverHours(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    driver_id: str
-    date: str  # YYYY-MM-DD
-    hours: float
-    created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-class DriverHoursCreate(BaseModel):
-    driver_id: str  # Target driver (Boss/CS assigns hours)
-    date: str
-    hours: float = Field(gt=0)
-
-class Settings(BaseModel):
-    model_config = ConfigDict(extra="ignore", use_enum_values=True)
-    id: str = "global_settings"
-    payment_method: PaymentMethod = PaymentMethod.per_package
-    hourly_rate: float = 15.0
-    per_delivery_rate: float = 5.0
-    per_pickup_rate: float = 3.0
-    updated_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    updated_by: Optional[str] = None
-
-class SettingsUpdate(BaseModel):
-    model_config = ConfigDict(use_enum_values=True)
-    payment_method: Optional[PaymentMethod] = None
-    hourly_rate: Optional[float] = None
-    per_delivery_rate: Optional[float] = None
-    per_pickup_rate: Optional[float] = None
-
-class AuditLog(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    action: str  # delete, update
-    entity_type: str  # order, inventory
-    entity_id: str
-    entity_name: str
-    performed_by: str
-    performed_by_name: str
-    details: str
-    timestamp: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-
-# ============== HELPER FUNCTIONS ==============
-
-def hash_password(password: str) -> str:
-    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
-
-def verify_password(password: str, hashed: str) -> bool:
-    return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
-
-def create_token(user_id: str, username: str, role: str) -> str:
-    payload = {
-        "user_id": user_id,
-        "username": username,
-        "role": role,
-        "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRATION_HOURS)
-    }
-    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
-
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    try:
-        token = credentials.credentials
-        payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
-        return payload
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token expired")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status_code=401, detail="Invalid token")
-
-def require_role(allowed_roles: List[str]):
-    async def role_checker(user = Depends(get_current_user)):
-        if user["role"] not in allowed_roles:
-            raise HTTPException(status_code=403, detail="Insufficient permissions")
-        return user
-    return role_checker
-
-async def create_audit_log(action: str, entity_type: str, entity_id: str, entity_name: str, user_id: str, user_name: str, details: str):
-    log = AuditLog(
-        action=action,
-        entity_type=entity_type,
-        entity_id=entity_id,
-        entity_name=entity_name,
-        performed_by=user_id,
-        performed_by_name=user_name,
-        details=details
-    )
-    await db.audit_logs.insert_one(log.model_dump())
 
 # ============== AUTH ROUTES ==============
 
@@ -549,7 +306,7 @@ async def create_order(order_data: OrderCreate, user = Depends(require_role(["bo
         ))
 
     # Atomically deduct inventory; rollback prior deductions if any fails (race-safe).
-    # Free gifts also deduct stock — they are real items leaving the warehouse.
+    # Free gifts also deduct stock -- they are real items leaving the warehouse.
     deducted: List[OrderItem] = []
     for item in resolved_items:
         if item.variant_name:
@@ -667,7 +424,7 @@ async def cancel_order(order_id: str, user = Depends(require_role(["boss", "cust
     if existing["status"] != "pending":
         raise HTTPException(status_code=400, detail="Only pending orders can be cancelled")
     
-    # Restore inventory for cancelled order (free gifts included — they were deducted at creation)
+    # Restore inventory for cancelled order (free gifts included -- they were deducted at creation)
     for item in existing["items"]:
         if item.get("variant_name"):
             await db.inventory.update_one(
@@ -1234,7 +991,7 @@ async def shutdown_db_client():
 
 @app.on_event("startup")
 async def ensure_indexes():
-    """Create unique indexes for data integrity. Idempotent — safe to run on every boot."""
+    """Create unique indexes for data integrity. Idempotent -- safe to run on every boot."""
     await db.users.create_index("username", unique=True)
     await db.orders.create_index("id", unique=True)
     await db.inventory.create_index("id", unique=True)
