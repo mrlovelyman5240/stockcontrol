@@ -55,11 +55,7 @@ const NewOrder = () => {
     }
   };
 
-  // Helper: get total stock for product (sum of variant stocks or product-level)
-  const getProductTotalStock = (item) => {
-    if (item.variants?.length > 0) return item.variants.reduce((s, v) => s + (v.stock ?? 0), 0);
-    return item.stock;
-  };
+  const getProductTotalStock = (item) => item.stock ?? 0;
 
   // Derive the selected gift label from freeGiftId
   const selectedGiftOption = (() => {
@@ -103,7 +99,8 @@ const NewOrder = () => {
 
     if (existingIndex >= 0) {
       const newCart = [...cart];
-      const maxStock = variant ? (variant.stock ?? 0) : product.stock;
+      const unitsPer = variant ? Math.max(1, variant.units_per ?? 1) : 1;
+      const maxStock = Math.floor((product.stock ?? 0) / unitsPer);
       if (newCart[existingIndex].quantity >= maxStock) {
         toast.error('Not enough stock');
         return;
@@ -139,14 +136,14 @@ const NewOrder = () => {
       setCart(cart.filter((_, i) => i !== index));
       return;
     }
-    // Use variant-level stock if variant selected
     if (inventoryItem) {
       let maxStock;
       if (item.variant_name && inventoryItem.variants?.length > 0) {
         const variant = inventoryItem.variants.find(v => v.name === item.variant_name);
-        maxStock = variant ? (variant.stock ?? 0) : 0;
+        const unitsPer = Math.max(1, variant?.units_per ?? 1);
+        maxStock = Math.floor((inventoryItem.stock ?? 0) / unitsPer);
       } else {
-        maxStock = inventoryItem.stock;
+        maxStock = inventoryItem.stock ?? 0;
       }
       if (newQty > maxStock) {
         toast.error('Not enough stock');

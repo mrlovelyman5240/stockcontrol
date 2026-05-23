@@ -4,10 +4,8 @@ import { ScrollArea } from '../../../components/ui/scroll-area';
 import { formatCurrency } from '../../../lib/utils';
 import { AlertTriangle, Search, Layers, ChevronRight } from 'lucide-react';
 
-const getProductTotalStock = (item) => {
-  if (item.variants?.length > 0) return item.variants.reduce((s, v) => s + (v.stock ?? 0), 0);
-  return item.stock;
-};
+// Base stock is the source of truth — variants only describe consumption per sale.
+const getProductTotalStock = (item) => item.stock ?? 0;
 
 const ProductSearch = ({ inventory, search, onSearchChange, onProductClick }) => {
   const filtered = inventory.filter(item =>

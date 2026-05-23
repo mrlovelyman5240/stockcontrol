@@ -7,10 +7,7 @@ import { ScrollArea } from '../../../components/ui/scroll-area';
 import { Popover, PopoverContent, PopoverTrigger } from '../../../components/ui/popover';
 import { Gift, Search, Check, ChevronRight, ChevronsUpDown } from 'lucide-react';
 
-const getProductTotalStock = (item) => {
-  if (item.variants?.length > 0) return item.variants.reduce((s, v) => s + (v.stock ?? 0), 0);
-  return item.stock;
-};
+const getProductTotalStock = (item) => item.stock ?? 0;
 
 const GiftSelector = ({ inventory, freeGiftId, selectedGiftOption, onSelect, onClear }) => {
   const [open, setOpen] = useState(false);
@@ -133,7 +130,8 @@ const GiftSelector = ({ inventory, freeGiftId, selectedGiftOption, onSelect, onC
                   {hasVariants && isExpanded && (
                     <div className="bg-muted/40 border-t border-b">
                       {item.variants.map((v, vIdx) => {
-                        const vStock = v.stock ?? 0;
+                        const unitsPer = Math.max(1, v.units_per ?? 1);
+                        const vStock = Math.floor((item.stock ?? 0) / unitsPer);
                         const isOutOfStock = vStock <= 0;
                         const isSelected = freeGiftId === `${item.id}:::${v.name}`;
                         return (

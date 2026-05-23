@@ -50,7 +50,8 @@ const VariantDialog = ({ open, product, onOpenChange, onAddToCart }) => {
               <Label className="text-sm text-muted-foreground">Select Variant</Label>
               <div className="grid grid-cols-1 gap-2">
                 {product.variants.map((v, idx) => {
-                  const variantStock = v.stock ?? 0;
+                  const unitsPer = Math.max(1, v.units_per ?? 1);
+                  const variantStock = Math.floor((product.stock ?? 0) / unitsPer);
                   const isOutOfStock = variantStock <= 0;
                   return (
                     <button
