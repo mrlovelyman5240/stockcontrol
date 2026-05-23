@@ -7,14 +7,14 @@ import { Label } from '../../components/ui/label';
 import { Badge } from '../../components/ui/badge';
 import { ScrollArea } from '../../components/ui/scroll-area';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog';
-import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/popover';
 import { inventoryApi, ordersApi, usersApi } from '../../lib/api';
 import { formatCurrency, getApiErrorMessage } from '../../lib/utils';
 import { toast } from 'sonner';
 import DriverSelect from './new-order/DriverSelect';
-import { 
-  ShoppingCart, 
-  Plus, 
+import GiftSelector from './new-order/GiftSelector';
+import {
+  ShoppingCart,
+  Plus,
   Minus,
   Trash2,
   Gift,
@@ -26,8 +26,7 @@ import {
   ShoppingBag,
   MessageSquare,
   Layers,
-  ChevronRight,
-  ChevronsUpDown
+  ChevronRight
 } from 'lucide-react';
 
 const NewOrder = () => {
@@ -41,9 +40,6 @@ const NewOrder = () => {
   const [selectedDriver, setSelectedDriver] = useState('');
   const [orderType, setOrderType] = useState('delivery');
   const [freeGiftId, setFreeGiftId] = useState('');
-  const [giftPopoverOpen, setGiftPopoverOpen] = useState(false);
-  const [giftSearch, setGiftSearch] = useState('');
-  const [expandedGiftProduct, setExpandedGiftProduct] = useState(null);
   const [cart, setCart] = useState([]);
 
   // Variant selection state
@@ -89,27 +85,9 @@ const NewOrder = () => {
     };
   })();
 
-  // Gift popover: products filtered by search
-  const giftProducts = inventory.filter(item => {
-    const totalStock = getProductTotalStock(item);
-    if (totalStock <= 0) return false;
-    if (!giftSearch) return true;
-    return item.name.toLowerCase().includes(giftSearch.toLowerCase());
-  });
-
-  const selectGift = (itemId, variantName) => {
+  const handleGiftSelect = (itemId, variantName) => {
     const key = variantName ? `${itemId}:::${variantName}` : itemId;
     setFreeGiftId(key);
-    setGiftPopoverOpen(false);
-    setExpandedGiftProduct(null);
-    setGiftSearch('');
-  };
-
-  const clearGift = () => {
-    setFreeGiftId('');
-    setGiftPopoverOpen(false);
-    setExpandedGiftProduct(null);
-    setGiftSearch('');
   };
 
   // Product click handler — opens variant dialog or adds directly
@@ -350,137 +328,13 @@ const NewOrder = () => {
       {/* Driver + Free Gift row */}
       <div className="grid grid-cols-2 gap-3 mb-4">
         <DriverSelect drivers={drivers} value={selectedDriver} onChange={setSelectedDriver} />
-        <div>
-          <Label className="flex items-center gap-1 mb-1.5 text-xs font-medium text-muted-foreground">
-            <Gift className="h-3 w-3" />
-            Free Gift
-          </Label>
-          <Popover open={giftPopoverOpen} onOpenChange={(open) => {
-            setGiftPopoverOpen(open);
-            if (!open) { setExpandedGiftProduct(null); setGiftSearch(''); }
-          }}>
-            <PopoverTrigger asChild>
-              <Button
-                variant="outline"
-                className="w-full h-10 justify-between font-normal text-left"
-                data-testid="free-gift-select"
-              >
-                <span className="truncate text-sm">
-                  {selectedGiftOption ? selectedGiftOption.label : 'None'}
-                </span>
-                <ChevronsUpDown className="ml-1 h-3 w-3 shrink-0 opacity-50" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-[280px] p-0" align="start">
-              {/* Search */}
-              <div className="p-2 border-b">
-                <div className="relative">
-                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-                  <Input
-                    placeholder="Search products..."
-                    value={giftSearch}
-                    onChange={(e) => { setGiftSearch(e.target.value); setExpandedGiftProduct(null); }}
-                    className="h-8 pl-8 text-sm"
-                    data-testid="gift-search-input"
-                  />
-                </div>
-              </div>
-              {/* Options list */}
-              <ScrollArea className="max-h-[240px]">
-                {/* No gift option */}
-                <button
-                  type="button"
-                  onClick={clearGift}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted/60 transition-colors text-muted-foreground"
-                  data-testid="gift-option-none"
-                >
-                  <Check className={`h-3.5 w-3.5 shrink-0 ${!freeGiftId ? 'opacity-100' : 'opacity-0'}`} />
-                  No free gift
-                </button>
-                <div className="border-t" />
-                {/* Product list */}
-                {giftProducts.length === 0 && (
-                  <div className="p-4 text-center text-sm text-muted-foreground">No products found</div>
-                )}
-                {giftProducts.map((item) => {
-                  const hasVariants = item.variants?.length > 0;
-                  const isExpanded = expandedGiftProduct === item.id;
-                  const isSelectedProduct = selectedGiftOption?.item_id === item.id;
-                  return (
-                    <div key={item.id}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (hasVariants) {
-                            setExpandedGiftProduct(isExpanded ? null : item.id);
-                          } else {
-                            selectGift(item.id, null);
-                          }
-                        }}
-                        className={`w-full flex items-center justify-between px-3 py-2 text-sm transition-colors ${
-                          isExpanded ? 'bg-muted/80' : 'hover:bg-muted/60'
-                        }`}
-                        data-testid={`gift-product-${item.id}`}
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          {!hasVariants && (
-                            <Check className={`h-3.5 w-3.5 shrink-0 ${isSelectedProduct && !selectedGiftOption?.variant_name ? 'opacity-100' : 'opacity-0'}`} />
-                          )}
-                          {hasVariants && (
-                            <ChevronRight className={`h-3.5 w-3.5 shrink-0 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
-                          )}
-                          <span className="truncate font-medium">{item.name}</span>
-                        </div>
-                        {hasVariants && (
-                          <Badge variant="outline" className="text-[10px] px-1.5 py-0 shrink-0 ml-1">
-                            {item.variants.length}
-                          </Badge>
-                        )}
-                        {!hasVariants && (
-                          <span className="text-xs text-muted-foreground shrink-0 ml-1">{item.stock} left</span>
-                        )}
-                      </button>
-                      {/* Expanded variant list (accordion) */}
-                      {hasVariants && isExpanded && (
-                        <div className="bg-muted/40 border-t border-b">
-                          {item.variants.map((v, vIdx) => {
-                            const vStock = v.stock ?? 0;
-                            const isOutOfStock = vStock <= 0;
-                            const isSelected = freeGiftId === `${item.id}:::${v.name}`;
-                            return (
-                              <button
-                                key={vIdx}
-                                type="button"
-                                onClick={() => !isOutOfStock && selectGift(item.id, v.name)}
-                                disabled={isOutOfStock}
-                                className={`w-full flex items-center justify-between pl-8 pr-3 py-1.5 text-sm transition-colors ${
-                                  isOutOfStock
-                                    ? 'opacity-35 cursor-not-allowed'
-                                    : isSelected
-                                      ? 'bg-primary/10 text-primary'
-                                      : 'hover:bg-muted/80'
-                                }`}
-                                data-testid={`gift-variant-${item.id}-${v.name}`}
-                              >
-                                <div className="flex items-center gap-2">
-                                  <Check className={`h-3.5 w-3.5 shrink-0 ${isSelected ? 'opacity-100' : 'opacity-0'}`} />
-                                  <span>{v.name}</span>
-                                </div>
-                                <span className={`text-xs ${isOutOfStock ? 'text-destructive' : 'text-muted-foreground'}`}>
-                                  {isOutOfStock ? 'Out' : `${vStock} left`}
-                                </span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </ScrollArea>
-            </PopoverContent>
-          </Popover>
-        </div>
+        <GiftSelector
+          inventory={inventory}
+          freeGiftId={freeGiftId}
+          selectedGiftOption={selectedGiftOption}
+          onSelect={handleGiftSelect}
+          onClear={() => setFreeGiftId('')}
+        />
       </div>
 
       {/* Free gift indicator */}
