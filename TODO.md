@@ -36,8 +36,8 @@ Para ve hesap kaybına yol açabilecek bug'lar. Sıra önemli.
 ## FAZ 2 — REFACTOR (DRY, dosya bölme)
 
 - [ ] **2.1** `backend/server.py` (1187 satır) → `backend/routers/` altında `auth.py`, `users.py`, `orders.py`, `inventory.py`, `payments.py`, `settings.py` olarak böl. FastAPI `APIRouter` kullan.
-- [ ] **2.2** Frontend: `pages/boss/Inventory.js` + `pages/service/Inventory.js` → tek `pages/shared/Inventory.js` (role prop ile).
-- [ ] **2.3** Frontend: `pages/boss/Staff.js` + `pages/service/Staff.js` → tek `pages/shared/Staff.js`.
+- [x] **2.2** Frontend: `pages/boss/Inventory.js` + `pages/service/Inventory.js` → tek `pages/shared/Inventory.js` (role prop ile).
+- [x] **2.3** Frontend: `pages/boss/Staff.js` + `pages/service/Staff.js` → tek `pages/shared/Staff.js`.
 - [ ] **2.4** `pages/service/NewOrder.js` (390 satır) → alt componentlere böl: `ProductSearch`, `Cart`, `GiftSelector`, `DriverSelect`.
 - [x] **2.5** "Change password" formunu (Settings + Driver Profile + Service Profile'da tekrar eden) tek `ChangePasswordForm` component'ine taşı.
 - [x] **2.6** `BottomNav.js` içindeki rol bazlı navigasyon mantığını merkezi config'e taşı (`config/navigation.js`).

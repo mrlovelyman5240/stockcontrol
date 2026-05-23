@@ -10,7 +10,8 @@ import { usersApi, driverHoursApi } from '../../lib/api';
 import { toast } from 'sonner';
 import { Clock, Users, Loader2, Calendar, Save, User } from 'lucide-react';
 
-const ServiceStaff = () => {
+const Staff = ({ role = 'boss' }) => {
+  const isBoss = role === 'boss';
   const [drivers, setDrivers] = useState([]);
   const [hoursLog, setHoursLog] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -18,8 +19,10 @@ const ServiceStaff = () => {
   const [selectedDriver, setSelectedDriver] = useState('');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const [hoursValue, setHoursValue] = useState('');
+  const [filterDriver, setFilterDriver] = useState('');
 
   useEffect(() => { fetchData(); }, []);
+  useEffect(() => { if (isBoss) fetchHours(); }, [filterDriver]);
 
   const fetchData = async () => {
     try {
@@ -36,6 +39,17 @@ const ServiceStaff = () => {
     }
   };
 
+  const fetchHours = async () => {
+    try {
+      const params = {};
+      if (filterDriver && filterDriver !== 'all') params.driver_id = filterDriver;
+      const res = await driverHoursApi.getAll(params);
+      setHoursLog(res.data);
+    } catch (error) {
+      toast.error('Failed to load hours');
+    }
+  };
+
   const handleSubmit = async () => {
     if (!selectedDriver || !selectedDate || !hoursValue) {
       toast.error('Please fill in all fields');
@@ -46,8 +60,12 @@ const ServiceStaff = () => {
       await driverHoursApi.log(selectedDriver, selectedDate, parseFloat(hoursValue));
       toast.success('Hours logged successfully');
       setHoursValue('');
-      const res = await driverHoursApi.getAll();
-      setHoursLog(res.data);
+      if (isBoss) {
+        fetchHours();
+      } else {
+        const res = await driverHoursApi.getAll();
+        setHoursLog(res.data);
+      }
     } catch (error) {
       const msg = error.response?.data?.detail;
       toast.error(typeof msg === 'string' ? msg : 'Failed to log hours');
@@ -63,7 +81,7 @@ const ServiceStaff = () => {
   }
 
   return (
-    <div className="p-4 max-w-2xl mx-auto pb-24" data-testid="service-staff-page">
+    <div className="p-4 max-w-2xl mx-auto pb-24" data-testid={`${role}-staff-page`}>
       <div className="flex items-center gap-3 mb-6">
         <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
           <Users className="h-5 w-5 text-primary" />
@@ -110,18 +128,35 @@ const ServiceStaff = () => {
         </CardContent>
       </Card>
 
-      <h2 className="text-sm font-semibold text-muted-foreground mb-3">RECENT HOURS</h2>
-      <ScrollArea className="h-[calc(100vh-480px)]">
+      {isBoss ? (
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-muted-foreground">HOURS HISTORY</h2>
+          <Select value={filterDriver} onValueChange={setFilterDriver}>
+            <SelectTrigger className="w-[160px] h-8 text-sm"><SelectValue placeholder="All drivers" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All drivers</SelectItem>
+              {drivers.map(d => <SelectItem key={d.id} value={d.id}>{d.username}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      ) : (
+        <h2 className="text-sm font-semibold text-muted-foreground mb-3">RECENT HOURS</h2>
+      )}
+
+      <ScrollArea className={isBoss ? "h-[calc(100vh-520px)]" : "h-[calc(100vh-480px)]"}>
         <div className="space-y-2">
           {hoursLog.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground"><Clock className="h-10 w-10 mx-auto mb-2 opacity-40" /><p>No hours logged yet</p></div>
           ) : (
             hoursLog.map((h) => (
-              <Card key={h.id}>
+              <Card key={h.id} data-testid={isBoss ? `hours-entry-${h.id}` : undefined}>
                 <CardContent className="p-3 flex items-center justify-between">
                   <div>
                     <div className="font-medium text-sm">{h.driver_name || getDriverName(h.driver_id)}</div>
-                    <div className="text-xs text-muted-foreground flex items-center gap-2"><Calendar className="h-3 w-3" /> {h.date}</div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Calendar className="h-3 w-3" /> {h.date}
+                      {isBoss && h.logged_by && <span>by {h.logged_by}</span>}
+                    </div>
                   </div>
                   <Badge variant="outline" className="text-base font-bold">{h.hours}h</Badge>
                 </CardContent>
@@ -134,4 +169,4 @@ const ServiceStaff = () => {
   );
 };
 
-export default ServiceStaff;
+export default Staff;

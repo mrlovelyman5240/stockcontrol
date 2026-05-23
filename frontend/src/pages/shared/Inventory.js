@@ -9,11 +9,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { inventoryApi } from '../../lib/api';
 import { formatCurrency } from '../../lib/utils';
 import { toast } from 'sonner';
-import { 
+import {
   Package, Plus, Pencil, Trash2, Search, Loader2, AlertTriangle, X, Layers
 } from 'lucide-react';
 
-const ServiceInventory = () => {
+const Inventory = ({ role = 'boss' }) => {
   const [inventory, setInventory] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -117,7 +117,10 @@ const ServiceInventory = () => {
   };
 
   const handleDelete = async (item) => {
-    if (!window.confirm(`Delete "${item.name}"? This action will be logged.`)) return;
+    const confirmMsg = role === 'service'
+      ? `Delete "${item.name}"? This action will be logged.`
+      : `Delete "${item.name}"?`;
+    if (!window.confirm(confirmMsg)) return;
     try {
       await inventoryApi.delete(item.id);
       toast.success('Item deleted');
@@ -147,7 +150,7 @@ const ServiceInventory = () => {
   }
 
   return (
-    <div className="p-4 max-w-2xl mx-auto" data-testid="service-inventory">
+    <div className="p-4 max-w-2xl mx-auto" data-testid={`${role}-inventory`}>
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <div className="h-10 w-10 rounded-xl bg-primary/10 flex items-center justify-center">
@@ -174,7 +177,6 @@ const ServiceInventory = () => {
                 <Input id="name" value={formData.name} onChange={(e) => setFormData({ ...formData, name: e.target.value })} placeholder="e.g., Classic Burger" data-testid="item-name-input" />
               </div>
 
-              {/* Variants Section */}
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <Label className="flex items-center gap-2">
@@ -292,4 +294,4 @@ const ServiceInventory = () => {
   );
 };
 
-export default ServiceInventory;
+export default Inventory;
