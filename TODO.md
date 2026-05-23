@@ -116,11 +116,11 @@ Yeni model: tek `product.stock` (base stock). Variant'ta sadece `units_per` (def
 
 ---
 
-## FAZ 6 — TEST
+## FAZ 6 — TEST (✅ DONE 2026-05-23)
 
-- [ ] **6.1** Frontend için `@testing-library/react` kur, smoke test'ler yaz: `Login`, `AuthContext`, `NewOrder` happy path.
-- [ ] **6.2** Backend test'lerini güncelle: kaldırılan endpoint'lerin testlerini sil, yeni güvenlik fix'leri için test ekle (boss register engellenmeli, total backend'de hesaplanmalı, vb.).
-- [ ] **6.3** CI ekle (`.github/workflows/test.yml`): push'larda backend + frontend test'leri otomatik çalışsın.
+- [x] **6.1** Frontend için `vitest` + `@testing-library/react` + `jsdom` kuruldu, smoke test'ler yazıldı: `AuthContext` (provider scope + initial state), `Login` (render + empty-submit guard + credential pass-through), `NewOrder` (data load + base-stock display).
+- [x] **6.2** Backend için `test_security_fixes.py` eklendi: public register'da boss rolü engellenir, sipariş `total`/`price` client'tan ignore edilir, generic PUT status'ü değiştiremez, Payment/DriverHours/Inventory numeric validator'ları. (Önceki base-stock testleri ch4/ch8'de zaten yenilenmişti.)
+- [x] **6.3** CI workflow eklendi (`.github/workflows/test.yml`): frontend `npm ci` + `npm test` + `npm run build`; backend `pip install` + `compileall` + `pytest --collect-only`. Tam integration test job'u (live MongoDB + uvicorn) sonraki adım olarak not edildi.
 
 ---
 
