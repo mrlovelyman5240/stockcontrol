@@ -14,9 +14,12 @@ router = APIRouter(prefix="/orders", tags=["orders"])
 def _resolve_units_per(raw, label: str) -> int:
     """Normalize a stored units_per value. Missing → 1 (legacy default).
     Anything not a positive integer → 400 so corrupt data fails loud instead of
-    silently coercing (which previously masked corruption and 0-coerced data)."""
+    silently coercing. Booleans rejected explicitly: BSON stores them as a
+    distinct type and `int(True)==1` would otherwise mask data corruption."""
     if raw is None:
         return 1
+    if isinstance(raw, bool):
+        raise HTTPException(status_code=400, detail=f"Invalid units_per for {label}")
     try:
         value = int(raw)
     except (TypeError, ValueError):
@@ -229,6 +232,14 @@ async def cancel_order(
     if existing["status"] != "pending":
         raise HTTPException(status_code=400, detail="Only pending orders can be cancelled")
 
+    # Pre-validate every units_per BEFORE the state transition. If any snapshot is
+    # corrupt, fail with 400 while the order is still pending — so we never end up
+    # with an order marked cancelled and stock unrestored.
+    restore_plan: List[tuple] = []
+    for item in existing["items"]:
+        units_per = _resolve_units_per(item.get("units_per"), f"order item {item.get('name', '?')}")
+        restore_plan.append((item["item_id"], item["quantity"] * units_per))
+
     # Atomic pending→cancelled transition. Only the winning request restores stock;
     # a concurrent cancel/delete/complete that loses the race will see modified_count=0
     # and exit without touching stock — preventing double restoration.
@@ -245,13 +256,10 @@ async def cancel_order(
     if result.modified_count == 0:
         raise HTTPException(status_code=409, detail="Order is no longer pending")
 
-    # Restore base stock using units_per snapshotted on each OrderItem at creation
-    # (so later variant changes can't drift the math). Free gifts included.
-    for item in existing["items"]:
-        units_per = _resolve_units_per(item.get("units_per"), f"order item {item.get('name', '?')}")
-        base_cost = item["quantity"] * units_per
+    # Pre-validated above; safe to apply unconditionally now.
+    for item_id, base_cost in restore_plan:
         await db.inventory.update_one(
-            {"id": item["item_id"]},
+            {"id": item_id},
             {"$inc": {"stock": base_cost}},
         )
 
@@ -284,13 +292,18 @@ async def delete_order(
     # Non-pending orders (cancelled/completed) just need the row gone; stock was
     # already restored at cancellation or shipped on completion.
     if existing.get("status") == "pending":
+        # Pre-validate every units_per BEFORE the delete so a corrupt snapshot can't
+        # remove the row while leaving stock unrestored.
+        restore_plan: List[tuple] = []
+        for item in existing["items"]:
+            units_per = _resolve_units_per(item.get("units_per"), f"order item {item.get('name', '?')}")
+            restore_plan.append((item["item_id"], item["quantity"] * units_per))
+
         deleted = await db.orders.delete_one({"id": order_id, "status": "pending"})
         if deleted.deleted_count == 1:
-            for item in existing["items"]:
-                units_per = _resolve_units_per(item.get("units_per"), f"order item {item.get('name', '?')}")
-                base_cost = item["quantity"] * units_per
+            for item_id, base_cost in restore_plan:
                 await db.inventory.update_one(
-                    {"id": item["item_id"]},
+                    {"id": item_id},
                     {"$inc": {"stock": base_cost}},
                 )
         else:

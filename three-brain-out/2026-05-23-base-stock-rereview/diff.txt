@@ -1,0 +1,1985 @@
+﻿commit b410e50ab0a71722e260324cf22aa8b9bb8d0b8a
+Author: mrlovelyman5240 <mrlovelyman5240@gmail.com>
+Date:   Sat May 23 18:52:56 2026 +1000
+
+    [base-stock ch5 CRITICAL] atomic state transitions for cancel/complete/delete (close double-restore race); drop status from OrderUpdate so generic PUT can't bypass stock restoration
+    
+    Codex findings #1, #2, #3, #6:
+    - cancel/complete now gate on {id, status: pending} via update_one and check modified_count → only the winner mutates
+    - delete on pending uses conditional delete_one({id, status: pending}) → only the winner restores stock
+    - OrderUpdate.status removed; status transitions go exclusively through /complete and /cancel
+
+diff --git a/backend/models.py b/backend/models.py
+index a85a7ed..5f45eb9 100644
+--- a/backend/models.py
++++ b/backend/models.py
+@@ -155,8 +155,10 @@ class OrderCreate(BaseModel):
+ 
+ 
+ class OrderUpdate(BaseModel):
++    # Status transitions must go through /complete or /cancel — those routes
++    # atomically gate on status=pending and restore stock correctly. Allowing
++    # status here would let callers bypass stock restoration on cancel.
+     model_config = ConfigDict(use_enum_values=True)
+-    status: Optional[OrderStatus] = None
+     driver_id: Optional[str] = None
+     driver_name: Optional[str] = None
+ 
+diff --git a/backend/routers/orders.py b/backend/routers/orders.py
+index fee26d4..c87348a 100644
+--- a/backend/routers/orders.py
++++ b/backend/routers/orders.py
+@@ -158,9 +158,6 @@ async def update_order(
+ 
+     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+ 
+-    if update_data.get("status") == "completed":
+-        update_data["completed_at"] = datetime.now(timezone.utc).isoformat()
+-
+     await db.orders.update_one({"id": order_id}, {"$set": update_data})
+ 
+     updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
+@@ -182,15 +179,21 @@ async def complete_order(
+     if user["role"] == "driver" and existing.get("driver_id") != user["user_id"]:
+         raise HTTPException(status_code=403, detail="You can only complete your own orders")
+ 
+-    await db.orders.update_one(
+-        {"id": order_id},
++    # Atomic pending→completed transition. If a concurrent /cancel or /delete already
++    # changed status, modified_count will be 0 and we reject — preventing a state where
++    # the order ends up completed while stock was restored by the racing cancel.
++    now = datetime.now(timezone.utc).isoformat()
++    result = await db.orders.update_one(
++        {"id": order_id, "status": "pending"},
+         {"$set": {
+             "status": "completed",
+-            "completed_at": datetime.now(timezone.utc).isoformat(),
++            "completed_at": now,
+             "completed_by": user["username"],
+-            "updated_at": datetime.now(timezone.utc).isoformat(),
++            "updated_at": now,
+         }},
+     )
++    if result.modified_count == 0:
++        raise HTTPException(status_code=409, detail="Order is no longer pending")
+ 
+     updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
+     return Order(**updated)
+@@ -208,9 +211,24 @@ async def cancel_order(
+     if existing["status"] != "pending":
+         raise HTTPException(status_code=400, detail="Only pending orders can be cancelled")
+ 
+-    # Restore base stock for cancelled order using the units_per snapshotted on each
+-    # OrderItem at creation time (so later variant changes can't drift the math).
+-    # Free gifts included — they were deducted at creation.
++    # Atomic pending→cancelled transition. Only the winning request restores stock;
++    # a concurrent cancel/delete/complete that loses the race will see modified_count=0
++    # and exit without touching stock — preventing double restoration.
++    now = datetime.now(timezone.utc).isoformat()
++    result = await db.orders.update_one(
++        {"id": order_id, "status": "pending"},
++        {"$set": {
++            "status": "cancelled",
++            "cancelled_by": user["username"],
++            "cancelled_at": now,
++            "updated_at": now,
++        }},
++    )
++    if result.modified_count == 0:
++        raise HTTPException(status_code=409, detail="Order is no longer pending")
++
++    # Restore base stock using units_per snapshotted on each OrderItem at creation
++    # (so later variant changes can't drift the math). Free gifts included.
+     for item in existing["items"]:
+         units_per = int(item.get("units_per", 1)) or 1
+         base_cost = item["quantity"] * units_per
+@@ -219,16 +237,6 @@ async def cancel_order(
+             {"$inc": {"stock": base_cost}},
+         )
+ 
+-    await db.orders.update_one(
+-        {"id": order_id},
+-        {"$set": {
+-            "status": "cancelled",
+-            "cancelled_by": user["username"],
+-            "cancelled_at": datetime.now(timezone.utc).isoformat(),
+-            "updated_at": datetime.now(timezone.utc).isoformat(),
+-        }},
+-    )
+-
+     updated = await db.orders.find_one({"id": order_id}, {"_id": 0})
+ 
+     await create_audit_log(
+@@ -253,19 +261,26 @@ async def delete_order(
+     if not existing:
+         raise HTTPException(status_code=404, detail="Order not found")
+ 
+-    # Restore base stock only for pending orders, using OrderItem.units_per snapshot.
+-    # Cancelled orders already returned stock at cancellation; completed orders' goods
+-    # have been delivered.
++    # For pending orders the delete is the authoritative state change — use a
++    # conditional delete so only one request restores stock if two arrive concurrently.
++    # Non-pending orders (cancelled/completed) just need the row gone; stock was
++    # already restored at cancellation or shipped on completion.
+     if existing.get("status") == "pending":
+-        for item in existing["items"]:
+-            units_per = int(item.get("units_per", 1)) or 1
+-            base_cost = item["quantity"] * units_per
+-            await db.inventory.update_one(
+-                {"id": item["item_id"]},
+-                {"$inc": {"stock": base_cost}},
+-            )
+-
+-    await db.orders.delete_one({"id": order_id})
++        deleted = await db.orders.delete_one({"id": order_id, "status": "pending"})
++        if deleted.deleted_count == 1:
++            for item in existing["items"]:
++                units_per = int(item.get("units_per", 1)) or 1
++                base_cost = item["quantity"] * units_per
++                await db.inventory.update_one(
++                    {"id": item["item_id"]},
++                    {"$inc": {"stock": base_cost}},
++                )
++        else:
++            # Lost the race to a concurrent cancel/complete/delete; just remove the row
++            # if it still exists, never restore stock here.
++            await db.orders.delete_one({"id": order_id})
++    else:
++        await db.orders.delete_one({"id": order_id})
+ 
+     if user["role"] == "customer_service":
+         await create_audit_log(
+
+commit 5dad724706253e7c60e9afed3ba69da5881ffec6
+Author: mrlovelyman5240 <mrlovelyman5240@gmail.com>
+Date:   Sat May 23 18:56:14 2026 +1000
+
+    [base-stock ch6 HIGH] cart-aware base-stock guard in NewOrder + drop unused total field
+    
+    Codex findings #4, #5, #15:
+    - baseConsumedForProduct/remainingBaseStock helpers count every cart line + selected free gift against the same product.stock pool, using each line's variant.units_per
+    - add-to-cart, +1 in cart, and gift selection all gate on remaining >= units_per BEFORE mutating state
+    - ProductSearch/VariantDialog/GiftSelector display 'X left' from getRemaining(productId) so users see live, cart-aware availability instead of the optimistic per-line floor
+    - drop client-sent 'total' (backend recomputes from DB anyway; removed calculateTotal too)
+
+diff --git a/frontend/src/pages/service/NewOrder.js b/frontend/src/pages/service/NewOrder.js
+index 0d281d6..8153530 100644
+--- a/frontend/src/pages/service/NewOrder.js
++++ b/frontend/src/pages/service/NewOrder.js
+@@ -55,7 +55,36 @@ const NewOrder = () => {
+     }
+   };
+ 
+-  const getProductTotalStock = (item) => item.stock ?? 0;
++  // Resolve units_per for a (product, variantName) pair. Non-variant lines = 1.
++  const variantUnitsPer = (product, variantName) => {
++    if (!variantName || !product?.variants?.length) return 1;
++    const v = product.variants.find(vv => vv.name === variantName);
++    return Math.max(1, v?.units_per ?? 1);
++  };
++
++  // Total base-stock units already committed for a product across the entire cart
++  // plus the selected free gift. Used to compute remaining base stock so the UI
++  // and the add/update guards match what the backend will actually accept.
++  const baseConsumedForProduct = (productId, excludeCartIndex = null) => {
++    const invItem = inventory.find(i => i.id === productId);
++    if (!invItem) return 0;
++    let consumed = 0;
++    cart.forEach((line, idx) => {
++      if (idx === excludeCartIndex) return;
++      if (line.item_id !== productId || line.is_free_gift) return;
++      consumed += line.quantity * variantUnitsPer(invItem, line.variant_name);
++    });
++    if (selectedGiftOption && selectedGiftOption.item_id === productId) {
++      consumed += variantUnitsPer(invItem, selectedGiftOption.variant_name);
++    }
++    return consumed;
++  };
++
++  const remainingBaseStock = (productId, excludeCartIndex = null) => {
++    const invItem = inventory.find(i => i.id === productId);
++    if (!invItem) return 0;
++    return Math.max(0, (invItem.stock ?? 0) - baseConsumedForProduct(productId, excludeCartIndex));
++  };
+ 
+   // Derive the selected gift label from freeGiftId
+   const selectedGiftOption = (() => {
+@@ -72,13 +101,17 @@ const NewOrder = () => {
+   })();
+ 
+   const handleGiftSelect = (itemId, variantName) => {
++    const invItem = inventory.find(i => i.id === itemId);
++    if (invItem && remainingBaseStock(itemId) < variantUnitsPer(invItem, variantName)) {
++      toast.error('Not enough stock for this gift');
++      return;
++    }
+     const key = variantName ? `${itemId}:::${variantName}` : itemId;
+     setFreeGiftId(key);
+   };
+ 
+   const handleProductClick = (item) => {
+-    const totalStock = getProductTotalStock(item);
+-    if (totalStock <= 0) {
++    if (remainingBaseStock(item.id) <= 0) {
+       toast.error('Item is out of stock');
+       return;
+     }
+@@ -90,6 +123,12 @@ const NewOrder = () => {
+     if (!product) return;
+ 
+     const variantName = variant?.name || null;
++    const unitsPer = variantUnitsPer(product, variantName);
++    if (remainingBaseStock(product.id) < unitsPer) {
++      toast.error('Not enough stock');
++      return;
++    }
++
+     const existingIndex = cart.findIndex(c =>
+       c.item_id === product.id &&
+       c.variant_name === variantName &&
+@@ -99,12 +138,6 @@ const NewOrder = () => {
+ 
+     if (existingIndex >= 0) {
+       const newCart = [...cart];
+-      const unitsPer = variant ? Math.max(1, variant.units_per ?? 1) : 1;
+-      const maxStock = Math.floor((product.stock ?? 0) / unitsPer);
+-      if (newCart[existingIndex].quantity >= maxStock) {
+-        toast.error('Not enough stock');
+-        return;
+-      }
+       newCart[existingIndex].quantity += 1;
+       setCart(newCart);
+     } else {
+@@ -137,15 +170,10 @@ const NewOrder = () => {
+       return;
+     }
+     if (inventoryItem) {
+-      let maxStock;
+-      if (item.variant_name && inventoryItem.variants?.length > 0) {
+-        const variant = inventoryItem.variants.find(v => v.name === item.variant_name);
+-        const unitsPer = Math.max(1, variant?.units_per ?? 1);
+-        maxStock = Math.floor((inventoryItem.stock ?? 0) / unitsPer);
+-      } else {
+-        maxStock = inventoryItem.stock ?? 0;
+-      }
+-      if (newQty > maxStock) {
++      const unitsPer = variantUnitsPer(inventoryItem, item.variant_name);
++      // Recompute base consumption excluding this line, then see if newQty fits.
++      const otherConsumed = baseConsumedForProduct(item.item_id, index);
++      if (otherConsumed + newQty * unitsPer > (inventoryItem.stock ?? 0)) {
+         toast.error('Not enough stock');
+         return;
+       }
+@@ -158,8 +186,6 @@ const NewOrder = () => {
+     setCart(cart.filter((_, i) => i !== index));
+   };
+ 
+-  const calculateTotal = () => cart.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+-
+   const buildOrderItems = () => {
+     const items = [...cart];
+     if (freeGiftId && freeGiftId !== 'none' && selectedGiftOption) {
+@@ -199,7 +225,6 @@ const NewOrder = () => {
+       await ordersApi.create({
+         address: notes.trim(),
+         items: buildOrderItems(),
+-        total: calculateTotal(),
+         order_type: orderType,
+         driver_id: selectedDriver,
+         driver_name: driver.username
+@@ -291,6 +316,7 @@ const NewOrder = () => {
+           selectedGiftOption={selectedGiftOption}
+           onSelect={handleGiftSelect}
+           onClear={() => setFreeGiftId('')}
++          getRemaining={remainingBaseStock}
+         />
+       </div>
+ 
+@@ -312,6 +338,7 @@ const NewOrder = () => {
+         search={search}
+         onSearchChange={setSearch}
+         onProductClick={handleProductClick}
++        getRemaining={remainingBaseStock}
+       />
+ 
+       <VariantDialog
+@@ -322,6 +349,7 @@ const NewOrder = () => {
+           if (!open) setSelectedProduct(null);
+         }}
+         onAddToCart={handleAddToCartFromDialog}
++        getRemaining={remainingBaseStock}
+       />
+ 
+       <Cart
+diff --git a/frontend/src/pages/service/new-order/GiftSelector.jsx b/frontend/src/pages/service/new-order/GiftSelector.jsx
+index 018d582..f7be659 100644
+--- a/frontend/src/pages/service/new-order/GiftSelector.jsx
++++ b/frontend/src/pages/service/new-order/GiftSelector.jsx
+@@ -7,9 +7,8 @@ import { ScrollArea } from '../../../components/ui/scroll-area';
+ import { Popover, PopoverContent, PopoverTrigger } from '../../../components/ui/popover';
+ import { Gift, Search, Check, ChevronRight, ChevronsUpDown } from 'lucide-react';
+ 
+-const getProductTotalStock = (item) => item.stock ?? 0;
+-
+-const GiftSelector = ({ inventory, freeGiftId, selectedGiftOption, onSelect, onClear }) => {
++const GiftSelector = ({ inventory, freeGiftId, selectedGiftOption, onSelect, onClear, getRemaining }) => {
++  const remainingFor = (item) => (getRemaining ? getRemaining(item.id) : (item.stock ?? 0));
+   const [open, setOpen] = useState(false);
+   const [search, setSearch] = useState('');
+   const [expandedProduct, setExpandedProduct] = useState(null);
+@@ -37,8 +36,7 @@ const GiftSelector = ({ inventory, freeGiftId, selectedGiftOption, onSelect, onC
+   };
+ 
+   const giftProducts = inventory.filter(item => {
+-    const totalStock = getProductTotalStock(item);
+-    if (totalStock <= 0) return false;
++    if (remainingFor(item) <= 0) return false;
+     if (!search) return true;
+     return item.name.toLowerCase().includes(search.toLowerCase());
+   });
+@@ -124,14 +122,14 @@ const GiftSelector = ({ inventory, freeGiftId, selectedGiftOption, onSelect, onC
+                       </Badge>
+                     )}
+                     {!hasVariants && (
+-                      <span className="text-xs text-muted-foreground shrink-0 ml-1">{item.stock} left</span>
++                      <span className="text-xs text-muted-foreground shrink-0 ml-1">{remainingFor(item)} left</span>
+                     )}
+                   </button>
+                   {hasVariants && isExpanded && (
+                     <div className="bg-muted/40 border-t border-b">
+                       {item.variants.map((v, vIdx) => {
+                         const unitsPer = Math.max(1, v.units_per ?? 1);
+-                        const vStock = Math.floor((item.stock ?? 0) / unitsPer);
++                        const vStock = Math.floor(remainingFor(item) / unitsPer);
+                         const isOutOfStock = vStock <= 0;
+                         const isSelected = freeGiftId === `${item.id}:::${v.name}`;
+                         return (
+diff --git a/frontend/src/pages/service/new-order/ProductSearch.jsx b/frontend/src/pages/service/new-order/ProductSearch.jsx
+index 8ee479e..c93545a 100644
+--- a/frontend/src/pages/service/new-order/ProductSearch.jsx
++++ b/frontend/src/pages/service/new-order/ProductSearch.jsx
+@@ -4,10 +4,7 @@ import { ScrollArea } from '../../../components/ui/scroll-area';
+ import { formatCurrency } from '../../../lib/utils';
+ import { AlertTriangle, Search, Layers, ChevronRight } from 'lucide-react';
+ 
+-// Base stock is the source of truth — variants only describe consumption per sale.
+-const getProductTotalStock = (item) => item.stock ?? 0;
+-
+-const ProductSearch = ({ inventory, search, onSearchChange, onProductClick }) => {
++const ProductSearch = ({ inventory, search, onSearchChange, onProductClick, getRemaining }) => {
+   const filtered = inventory.filter(item =>
+     item.name.toLowerCase().includes(search.toLowerCase())
+   );
+@@ -28,7 +25,7 @@ const ProductSearch = ({ inventory, search, onSearchChange, onProductClick }) =>
+       <ScrollArea className="h-[220px] mb-4 border rounded-xl">
+         <div className="divide-y">
+           {filtered.map((item) => {
+-            const totalStock = getProductTotalStock(item);
++            const totalStock = getRemaining(item.id);
+             return (
+               <button
+                 key={item.id}
+diff --git a/frontend/src/pages/service/new-order/VariantDialog.jsx b/frontend/src/pages/service/new-order/VariantDialog.jsx
+index eeaa7e3..51d1158 100644
+--- a/frontend/src/pages/service/new-order/VariantDialog.jsx
++++ b/frontend/src/pages/service/new-order/VariantDialog.jsx
+@@ -6,7 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../../compo
+ import { formatCurrency } from '../../../lib/utils';
+ import { Plus } from 'lucide-react';
+ 
+-const VariantDialog = ({ open, product, onOpenChange, onAddToCart }) => {
++const VariantDialog = ({ open, product, onOpenChange, onAddToCart, getRemaining }) => {
+   const [selectedVariant, setSelectedVariant] = useState(null);
+   const [customPrice, setCustomPrice] = useState('');
+ 
+@@ -51,7 +51,8 @@ const VariantDialog = ({ open, product, onOpenChange, onAddToCart }) => {
+               <div className="grid grid-cols-1 gap-2">
+                 {product.variants.map((v, idx) => {
+                   const unitsPer = Math.max(1, v.units_per ?? 1);
+-                  const variantStock = Math.floor((product.stock ?? 0) / unitsPer);
++                  const remaining = getRemaining ? getRemaining(product.id) : (product.stock ?? 0);
++                  const variantStock = Math.floor(remaining / unitsPer);
+                   const isOutOfStock = variantStock <= 0;
+                   return (
+                     <button
+diff --git a/three-brain-out/2026-05-23-base-stock-review/codex-review.md b/three-brain-out/2026-05-23-base-stock-review/codex-review.md
+new file mode 100644
+index 0000000..dbc5805
+Binary files /dev/null and b/three-brain-out/2026-05-23-base-stock-review/codex-review.md differ
+diff --git a/three-brain-out/2026-05-23-base-stock-review/diff.txt b/three-brain-out/2026-05-23-base-stock-review/diff.txt
+new file mode 100644
+index 0000000..ba24fe4
+--- /dev/null
++++ b/three-brain-out/2026-05-23-base-stock-review/diff.txt
+@@ -0,0 +1,966 @@
++﻿commit db87999127fdeb1e04c93f1aab88097710aa01de
++Author: mrlovelyman5240 <mrlovelyman5240@gmail.com>
++Date:   Sat May 23 18:42:24 2026 +1000
++
++    [base-stock ch3] NewOrder flow uses floor(stock/units_per) for variant max; remove variant.stock from ProductSearch, VariantDialog, GiftSelector, NewOrder parent
++
++diff --git a/frontend/src/pages/service/NewOrder.js b/frontend/src/pages/service/NewOrder.js
++index 1949a93..0d281d6 100644
++--- a/frontend/src/pages/service/NewOrder.js
+++++ b/frontend/src/pages/service/NewOrder.js
++@@ -55,11 +55,7 @@ const NewOrder = () => {
++     }
++   };
++ 
++-  // Helper: get total stock for product (sum of variant stocks or product-level)
++-  const getProductTotalStock = (item) => {
++-    if (item.variants?.length > 0) return item.variants.reduce((s, v) => s + (v.stock ?? 0), 0);
++-    return item.stock;
++-  };
+++  const getProductTotalStock = (item) => item.stock ?? 0;
++ 
++   // Derive the selected gift label from freeGiftId
++   const selectedGiftOption = (() => {
++@@ -103,7 +99,8 @@ const NewOrder = () => {
++ 
++     if (existingIndex >= 0) {
++       const newCart = [...cart];
++-      const maxStock = variant ? (variant.stock ?? 0) : product.stock;
+++      const unitsPer = variant ? Math.max(1, variant.units_per ?? 1) : 1;
+++      const maxStock = Math.floor((product.stock ?? 0) / unitsPer);
++       if (newCart[existingIndex].quantity >= maxStock) {
++         toast.error('Not enough stock');
++         return;
++@@ -139,14 +136,14 @@ const NewOrder = () => {
++       setCart(cart.filter((_, i) => i !== index));
++       return;
++     }
++-    // Use variant-level stock if variant selected
++     if (inventoryItem) {
++       let maxStock;
++       if (item.variant_name && inventoryItem.variants?.length > 0) {
++         const variant = inventoryItem.variants.find(v => v.name === item.variant_name);
++-        maxStock = variant ? (variant.stock ?? 0) : 0;
+++        const unitsPer = Math.max(1, variant?.units_per ?? 1);
+++        maxStock = Math.floor((inventoryItem.stock ?? 0) / unitsPer);
++       } else {
++-        maxStock = inventoryItem.stock;
+++        maxStock = inventoryItem.stock ?? 0;
++       }
++       if (newQty > maxStock) {
++         toast.error('Not enough stock');
++diff --git a/frontend/src/pages/service/new-order/GiftSelector.jsx b/frontend/src/pages/service/new-order/GiftSelector.jsx
++index 5bccda2..018d582 100644
++--- a/frontend/src/pages/service/new-order/GiftSelector.jsx
+++++ b/frontend/src/pages/service/new-order/GiftSelector.jsx
++@@ -7,10 +7,7 @@ import { ScrollArea } from '../../../components/ui/scroll-area';
++ import { Popover, PopoverContent, PopoverTrigger } from '../../../components/ui/popover';
++ import { Gift, Search, Check, ChevronRight, ChevronsUpDown } from 'lucide-react';
++ 
++-const getProductTotalStock = (item) => {
++-  if (item.variants?.length > 0) return item.variants.reduce((s, v) => s + (v.stock ?? 0), 0);
++-  return item.stock;
++-};
+++const getProductTotalStock = (item) => item.stock ?? 0;
++ 
++ const GiftSelector = ({ inventory, freeGiftId, selectedGiftOption, onSelect, onClear }) => {
++   const [open, setOpen] = useState(false);
++@@ -133,7 +130,8 @@ const GiftSelector = ({ inventory, freeGiftId, selectedGiftOption, onSelect, onC
++                   {hasVariants && isExpanded && (
++                     <div className="bg-muted/40 border-t border-b">
++                       {item.variants.map((v, vIdx) => {
++-                        const vStock = v.stock ?? 0;
+++                        const unitsPer = Math.max(1, v.units_per ?? 1);
+++                        const vStock = Math.floor((item.stock ?? 0) / unitsPer);
++                         const isOutOfStock = vStock <= 0;
++                         const isSelected = freeGiftId === `${item.id}:::${v.name}`;
++                         return (
++diff --git a/frontend/src/pages/service/new-order/ProductSearch.jsx b/frontend/src/pages/service/new-order/ProductSearch.jsx
++index a0abf24..8ee479e 100644
++--- a/frontend/src/pages/service/new-order/ProductSearch.jsx
+++++ b/frontend/src/pages/service/new-order/ProductSearch.jsx
++@@ -4,10 +4,8 @@ import { ScrollArea } from '../../../components/ui/scroll-area';
++ import { formatCurrency } from '../../../lib/utils';
++ import { AlertTriangle, Search, Layers, ChevronRight } from 'lucide-react';
++ 
++-const getProductTotalStock = (item) => {
++-  if (item.variants?.length > 0) return item.variants.reduce((s, v) => s + (v.stock ?? 0), 0);
++-  return item.stock;
++-};
+++// Base stock is the source of truth — variants only describe consumption per sale.
+++const getProductTotalStock = (item) => item.stock ?? 0;
++ 
++ const ProductSearch = ({ inventory, search, onSearchChange, onProductClick }) => {
++   const filtered = inventory.filter(item =>
++diff --git a/frontend/src/pages/service/new-order/VariantDialog.jsx b/frontend/src/pages/service/new-order/VariantDialog.jsx
++index 7b5ab00..eeaa7e3 100644
++--- a/frontend/src/pages/service/new-order/VariantDialog.jsx
+++++ b/frontend/src/pages/service/new-order/VariantDialog.jsx
++@@ -50,7 +50,8 @@ const VariantDialog = ({ open, product, onOpenChange, onAddToCart }) => {
++               <Label className="text-sm text-muted-foreground">Select Variant</Label>
++               <div className="grid grid-cols-1 gap-2">
++                 {product.variants.map((v, idx) => {
++-                  const variantStock = v.stock ?? 0;
+++                  const unitsPer = Math.max(1, v.units_per ?? 1);
+++                  const variantStock = Math.floor((product.stock ?? 0) / unitsPer);
++                   const isOutOfStock = variantStock <= 0;
++                   return (
++                     <button
++
++commit 0647bc6f714b9d1a5e93379d0b5bd8cd7c6a9182
++Author: mrlovelyman5240 <mrlovelyman5240@gmail.com>
++Date:   Sat May 23 18:44:56 2026 +1000
++
++    [base-stock ch4 tests] rewrite variant stock tests to base-stock model; verify qty*units_per deduction and OrderItem.units_per snapshot integrity on cancel
++
++diff --git a/backend/tests/test_base_stock_tracking.py b/backend/tests/test_base_stock_tracking.py
++new file mode 100644
++index 0000000..29fd21c
++--- /dev/null
+++++ b/backend/tests/test_base_stock_tracking.py
++@@ -0,0 +1,356 @@
+++"""
+++Backend API Tests for Stockcontrol — Base-Stock Model
+++
+++Model:
+++- Each inventory item has a single `stock` field at the product level (base stock).
+++- Variants describe consumption via `units_per` (default 1) — how many base
+++  units one sale of that variant consumes. Variants do NOT carry their own stock.
+++- Creating an order deducts `quantity * units_per` from `product.stock` atomically.
+++- Cancelling/deleting a pending order restores using the `units_per` snapshotted
+++  on each OrderItem (so later units_per changes don't break reversal).
+++"""
+++
+++import os
+++import pytest
+++import requests
+++
+++BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'http://localhost:8001')
+++
+++SERVICE_USER = {"username": "service1", "password": "service123"}
+++
+++
+++@pytest.fixture
+++def service_token():
+++    response = requests.post(f"{BASE_URL}/api/auth/login", json=SERVICE_USER)
+++    assert response.status_code == 200, f"Login failed: {response.text}"
+++    return response.json()["access_token"]
+++
+++
+++@pytest.fixture
+++def driver_info(service_token):
+++    headers = {"Authorization": f"Bearer {service_token}"}
+++    response = requests.get(f"{BASE_URL}/api/users/drivers", headers=headers)
+++    drivers = response.json()
+++    return drivers[0] if drivers else None
+++
+++
+++class TestInventoryUnitsPer:
+++    """Variants carry units_per, not stock. Product-level stock is the source of truth."""
+++
+++    def test_create_inventory_with_units_per_variants(self, service_token):
+++        headers = {"Authorization": f"Bearer {service_token}"}
+++
+++        item_data = {
+++            "name": "TEST_UnitsPer_Item",
+++            "price": 10.00,
+++            "stock": 100,
+++            "variants": [
+++                {"name": "Single", "price": 10.00, "units_per": 1},
+++                {"name": "Pack of 6", "price": 55.00, "units_per": 6},
+++                {"name": "Case of 24", "price": 200.00, "units_per": 24},
+++            ],
+++        }
+++
+++        response = requests.post(f"{BASE_URL}/api/inventory", json=item_data, headers=headers)
+++        assert response.status_code == 200, f"Failed to create item: {response.text}"
+++        data = response.json()
+++
+++        assert data["stock"] == 100
+++        assert len(data["variants"]) == 3
+++        assert data["variants"][0]["units_per"] == 1
+++        assert data["variants"][1]["units_per"] == 6
+++        assert data["variants"][2]["units_per"] == 24
+++
+++        requests.delete(f"{BASE_URL}/api/inventory/{data['id']}", headers=headers)
+++
+++    def test_units_per_defaults_to_one_when_omitted(self, service_token):
+++        headers = {"Authorization": f"Bearer {service_token}"}
+++
+++        item_data = {
+++            "name": "TEST_DefaultUnitsPer_Item",
+++            "price": 5.00,
+++            "stock": 10,
+++            "variants": [{"name": "Default", "price": 5.00}],
+++        }
+++
+++        response = requests.post(f"{BASE_URL}/api/inventory", json=item_data, headers=headers)
+++        assert response.status_code == 200, response.text
+++        data = response.json()
+++        assert data["variants"][0]["units_per"] == 1
+++
+++        requests.delete(f"{BASE_URL}/api/inventory/{data['id']}", headers=headers)
+++
+++    def test_units_per_must_be_positive(self, service_token):
+++        headers = {"Authorization": f"Bearer {service_token}"}
+++
+++        item_data = {
+++            "name": "TEST_BadUnitsPer_Item",
+++            "price": 5.00,
+++            "stock": 10,
+++            "variants": [{"name": "Bad", "price": 5.00, "units_per": 0}],
+++        }
+++
+++        response = requests.post(f"{BASE_URL}/api/inventory", json=item_data, headers=headers)
+++        assert response.status_code in (400, 422), f"Expected validation error, got {response.status_code}: {response.text}"
+++
+++
+++class TestOrderDeductsBaseStock:
+++    """Order creation deducts quantity * units_per from product.stock."""
+++
+++    @pytest.fixture
+++    def item_with_packs(self, service_token):
+++        headers = {"Authorization": f"Bearer {service_token}"}
+++        item_data = {
+++            "name": "TEST_PackDeduction_Item",
+++            "price": 10.00,
+++            "stock": 100,
+++            "variants": [
+++                {"name": "Single", "price": 10.00, "units_per": 1},
+++                {"name": "Pack of 6", "price": 55.00, "units_per": 6},
+++            ],
+++        }
+++        response = requests.post(f"{BASE_URL}/api/inventory", json=item_data, headers=headers)
+++        assert response.status_code == 200
+++        item = response.json()
+++        yield item
+++        requests.delete(f"{BASE_URL}/api/inventory/{item['id']}", headers=headers)
+++
+++    def test_variant_order_deducts_quantity_times_units_per(self, service_token, driver_info, item_with_packs):
+++        headers = {"Authorization": f"Bearer {service_token}"}
+++        item = item_with_packs
+++
+++        order_data = {
+++            "address": "TEST_PackOrder",
+++            "items": [{
+++                "item_id": item["id"],
+++                "name": f"{item['name']} (Pack of 6)",
+++                "price": 55.00,
+++                "quantity": 3,
+++                "variant_name": "Pack of 6",
+++                "is_free_gift": False,
+++            }],
+++            "total": 165.00,
+++            "order_type": "delivery",
+++            "driver_id": driver_info["id"],
+++            "driver_name": driver_info["username"],
+++        }
+++
+++        response = requests.post(f"{BASE_URL}/api/orders", json=order_data, headers=headers)
+++        assert response.status_code == 200, response.text
+++        order = response.json()
+++
+++        inv_response = requests.get(f"{BASE_URL}/api/inventory", headers=headers)
+++        updated = next(i for i in inv_response.json() if i["id"] == item["id"])
+++        assert updated["stock"] == 100 - (3 * 6)
+++
+++        requests.delete(f"{BASE_URL}/api/orders/{order['id']}", headers=headers)
+++
+++    def test_order_exceeding_base_stock_returns_400(self, service_token, driver_info, item_with_packs):
+++        headers = {"Authorization": f"Bearer {service_token}"}
+++        item = item_with_packs
+++
+++        # 20 packs * 6 units = 120 > stock 100
+++        order_data = {
+++            "address": "TEST_InsufficientPackOrder",
+++            "items": [{
+++                "item_id": item["id"],
+++                "name": f"{item['name']} (Pack of 6)",
+++                "price": 55.00,
+++                "quantity": 20,
+++                "variant_name": "Pack of 6",
+++                "is_free_gift": False,
+++            }],
+++            "total": 1100.00,
+++            "order_type": "delivery",
+++            "driver_id": driver_info["id"],
+++            "driver_name": driver_info["username"],
+++        }
+++
+++        response = requests.post(f"{BASE_URL}/api/orders", json=order_data, headers=headers)
+++        assert response.status_code == 400, response.text
+++        assert "stock" in response.json().get("detail", "").lower()
+++
+++
+++class TestOrderCancelRestoresBaseStock:
+++    """Cancelling a pending order restores quantity * units_per (using the OrderItem snapshot)."""
+++
+++    @pytest.fixture
+++    def item_for_cancel(self, service_token):
+++        headers = {"Authorization": f"Bearer {service_token}"}
+++        item_data = {
+++            "name": "TEST_CancelRestore_Item",
+++            "price": 12.00,
+++            "stock": 60,
+++            "variants": [{"name": "Pack of 4", "price": 45.00, "units_per": 4}],
+++        }
+++        response = requests.post(f"{BASE_URL}/api/inventory", json=item_data, headers=headers)
+++        assert response.status_code == 200
+++        item = response.json()
+++        yield item
+++        requests.delete(f"{BASE_URL}/api/inventory/{item['id']}", headers=headers)
+++
+++    def test_cancel_restores_base_stock_using_snapshot(self, service_token, driver_info, item_for_cancel):
+++        headers = {"Authorization": f"Bearer {service_token}"}
+++        item = item_for_cancel
+++
+++        order_data = {
+++            "address": "TEST_CancelRestoreOrder",
+++            "items": [{
+++                "item_id": item["id"],
+++                "name": f"{item['name']} (Pack of 4)",
+++                "price": 45.00,
+++                "quantity": 5,
+++                "variant_name": "Pack of 4",
+++                "is_free_gift": False,
+++            }],
+++            "total": 225.00,
+++            "order_type": "delivery",
+++            "driver_id": driver_info["id"],
+++            "driver_name": driver_info["username"],
+++        }
+++
+++        order_response = requests.post(f"{BASE_URL}/api/orders", json=order_data, headers=headers)
+++        assert order_response.status_code == 200
+++        order = order_response.json()
+++
+++        after_create = next(i for i in requests.get(f"{BASE_URL}/api/inventory", headers=headers).json() if i["id"] == item["id"])
+++        assert after_create["stock"] == 60 - (5 * 4)
+++
+++        cancel_response = requests.put(f"{BASE_URL}/api/orders/{order['id']}/cancel", headers=headers)
+++        assert cancel_response.status_code == 200, cancel_response.text
+++        assert cancel_response.json()["status"] == "cancelled"
+++
+++        after_cancel = next(i for i in requests.get(f"{BASE_URL}/api/inventory", headers=headers).json() if i["id"] == item["id"])
+++        assert after_cancel["stock"] == 60
+++
+++    def test_cancel_uses_orderitem_snapshot_not_current_variant(self, service_token, driver_info, item_for_cancel):
+++        """If units_per is changed on the variant after the order, cancel must use the snapshot."""
+++        headers = {"Authorization": f"Bearer {service_token}"}
+++        item = item_for_cancel
+++
+++        order_data = {
+++            "address": "TEST_SnapshotIntegrityOrder",
+++            "items": [{
+++                "item_id": item["id"],
+++                "name": f"{item['name']} (Pack of 4)",
+++                "price": 45.00,
+++                "quantity": 2,
+++                "variant_name": "Pack of 4",
+++                "is_free_gift": False,
+++            }],
+++            "total": 90.00,
+++            "order_type": "delivery",
+++            "driver_id": driver_info["id"],
+++            "driver_name": driver_info["username"],
+++        }
+++        order = requests.post(f"{BASE_URL}/api/orders", json=order_data, headers=headers).json()
+++
+++        # Mutate variant's units_per from 4 to 10 on inventory after the order
+++        mutated = {
+++            "name": item["name"],
+++            "price": item["price"],
+++            "stock": item["stock"] - (2 * 4),
+++            "variants": [{"name": "Pack of 4", "price": 45.00, "units_per": 10}],
+++        }
+++        update_response = requests.put(f"{BASE_URL}/api/inventory/{item['id']}", json=mutated, headers=headers)
+++        assert update_response.status_code == 200, update_response.text
+++
+++        # Cancel must restore 2 * 4 = 8 (snapshot), not 2 * 10 = 20 (current)
+++        cancel_response = requests.put(f"{BASE_URL}/api/orders/{order['id']}/cancel", headers=headers)
+++        assert cancel_response.status_code == 200
+++
+++        after_cancel = next(i for i in requests.get(f"{BASE_URL}/api/inventory", headers=headers).json() if i["id"] == item["id"])
+++        assert after_cancel["stock"] == item["stock"], (
+++            f"Expected snapshot-based restore to {item['stock']}, got {after_cancel['stock']}"
+++        )
+++
+++
+++class TestNonVariantProductStock:
+++    """Products without variants behave as units_per=1 (deduct quantity directly)."""
+++
+++    @pytest.fixture
+++    def non_variant_item(self, service_token):
+++        headers = {"Authorization": f"Bearer {service_token}"}
+++        item_data = {
+++            "name": "TEST_NonVariant_Item",
+++            "price": 8.99,
+++            "stock": 30,
+++            "variants": [],
+++        }
+++        response = requests.post(f"{BASE_URL}/api/inventory", json=item_data, headers=headers)
+++        assert response.status_code == 200
+++        item = response.json()
+++        yield item
+++        requests.delete(f"{BASE_URL}/api/inventory/{item['id']}", headers=headers)
+++
+++    def test_non_variant_order_deducts_quantity(self, service_token, driver_info, non_variant_item):
+++        headers = {"Authorization": f"Bearer {service_token}"}
+++        item = non_variant_item
+++
+++        order_data = {
+++            "address": "TEST_NonVariantOrder",
+++            "items": [{
+++                "item_id": item["id"],
+++                "name": item["name"],
+++                "price": item["price"],
+++                "quantity": 4,
+++                "variant_name": None,
+++                "is_free_gift": False,
+++            }],
+++            "total": item["price"] * 4,
+++            "order_type": "pickup",
+++            "driver_id": driver_info["id"],
+++            "driver_name": driver_info["username"],
+++        }
+++
+++        response = requests.post(f"{BASE_URL}/api/orders", json=order_data, headers=headers)
+++        assert response.status_code == 200, response.text
+++        order = response.json()
+++
+++        updated = next(i for i in requests.get(f"{BASE_URL}/api/inventory", headers=headers).json() if i["id"] == item["id"])
+++        assert updated["stock"] == 30 - 4
+++
+++        requests.delete(f"{BASE_URL}/api/orders/{order['id']}", headers=headers)
+++
+++    def test_non_variant_insufficient_stock_returns_400(self, service_token, driver_info, non_variant_item):
+++        headers = {"Authorization": f"Bearer {service_token}"}
+++        item = non_variant_item
+++
+++        order_data = {
+++            "address": "TEST_NonVariantInsufficientOrder",
+++            "items": [{
+++                "item_id": item["id"],
+++                "name": item["name"],
+++                "price": item["price"],
+++                "quantity": 50,
+++                "variant_name": None,
+++                "is_free_gift": False,
+++            }],
+++            "total": item["price"] * 50,
+++            "order_type": "delivery",
+++            "driver_id": driver_info["id"],
+++            "driver_name": driver_info["username"],
+++        }
+++
+++        response = requests.post(f"{BASE_URL}/api/orders", json=order_data, headers=headers)
+++        assert response.status_code == 400, response.text
+++
+++
+++class TestCleanup:
+++    def test_cleanup_test_orders(self, service_token):
+++        headers = {"Authorization": f"Bearer {service_token}"}
+++        orders = requests.get(f"{BASE_URL}/api/orders", headers=headers).json()
+++        for order in orders:
+++            if order.get("address", "").startswith("TEST_"):
+++                requests.delete(f"{BASE_URL}/api/orders/{order['id']}", headers=headers)
+++
+++    def test_cleanup_test_inventory(self, service_token):
+++        headers = {"Authorization": f"Bearer {service_token}"}
+++        items = requests.get(f"{BASE_URL}/api/inventory", headers=headers).json()
+++        for item in items:
+++            if item.get("name", "").startswith("TEST_"):
+++                requests.delete(f"{BASE_URL}/api/inventory/{item['id']}", headers=headers)
+++
+++
+++if __name__ == "__main__":
+++    pytest.main([__file__, "-v", "--tb=short"])
++diff --git a/backend/tests/test_variant_stock_tracking.py b/backend/tests/test_variant_stock_tracking.py
++deleted file mode 100644
++index cfc2589..0000000
++--- a/backend/tests/test_variant_stock_tracking.py
+++++ /dev/null
++@@ -1,483 +0,0 @@
++-"""
++-Backend API Tests for LogiFlow Pro - Variant-Specific Stock Tracking v5
++-Tests for:
++-1. POST /api/inventory with variants that each have stock field
++-2. POST /api/orders with variant_name — verify specific variant stock decremented
++-3. PUT /api/orders/{id}/cancel — verify specific variant stock restored
++-4. POST /api/orders with quantity exceeding variant stock — verify 400 error
++-5. Order with non-variant product still uses product-level stock
++-"""
++-
++-import pytest
++-import requests
++-import os
++-import time
++-
++-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://inventory-ops-hub-2.preview.emergentagent.com')
++-
++-# Test credentials
++-SERVICE_USER = {"username": "service1", "password": "service123"}
++-BOSS_USER = {"username": "boss", "password": "boss123"}
++-
++-
++-class TestVariantStockCRUD:
++-    """Tests for Inventory Variants with per-variant stock field"""
++-    
++-    @pytest.fixture
++-    def service_token(self):
++-        response = requests.post(f"{BASE_URL}/api/auth/login", json=SERVICE_USER)
++-        assert response.status_code == 200, f"Login failed: {response.text}"
++-        return response.json()["access_token"]
++-    
++-    @pytest.fixture
++-    def driver_info(self, service_token):
++-        headers = {"Authorization": f"Bearer {service_token}"}
++-        response = requests.get(f"{BASE_URL}/api/users/drivers", headers=headers)
++-        drivers = response.json()
++-        return drivers[0] if drivers else None
++-    
++-    def test_create_inventory_with_variant_stock(self, service_token):
++-        """Test POST /api/inventory with variants that each have stock field"""
++-        headers = {"Authorization": f"Bearer {service_token}"}
++-        
++-        item_data = {
++-            "name": "TEST_Stock_Variant_Item",
++-            "price": 10.00,
++-            "stock": 0,  # Product-level stock is 0 when using variants
++-            "variants": [
++-                {"name": "Small", "price": 10.00, "stock": 15},
++-                {"name": "Medium", "price": 15.00, "stock": 10},
++-                {"name": "Large", "price": 20.00, "stock": 5}
++-            ]
++-        }
++-        
++-        response = requests.post(f"{BASE_URL}/api/inventory", json=item_data, headers=headers)
++-        assert response.status_code == 200, f"Failed to create item: {response.text}"
++-        data = response.json()
++-        
++-        # Verify variants saved with stock
++-        assert "variants" in data
++-        assert len(data["variants"]) == 3
++-        assert data["variants"][0]["name"] == "Small"
++-        assert data["variants"][0]["stock"] == 15
++-        assert data["variants"][1]["name"] == "Medium"
++-        assert data["variants"][1]["stock"] == 10
++-        assert data["variants"][2]["name"] == "Large"
++-        assert data["variants"][2]["stock"] == 5
++-        print(f"✓ Created inventory item with per-variant stock: Small=15, Medium=10, Large=5")
++-        
++-        # Cleanup
++-        requests.delete(f"{BASE_URL}/api/inventory/{data['id']}", headers=headers)
++-        return data["id"]
++-    
++-    def test_get_inventory_returns_variant_stock(self, service_token):
++-        """Test GET /api/inventory returns stock field per variant"""
++-        headers = {"Authorization": f"Bearer {service_token}"}
++-        
++-        response = requests.get(f"{BASE_URL}/api/inventory", headers=headers)
++-        assert response.status_code == 200
++-        items = response.json()
++-        
++-        # Find items with variants
++-        items_with_variants = [i for i in items if i.get("variants") and len(i["variants"]) > 0]
++-        assert len(items_with_variants) > 0, "No items with variants found"
++-        
++-        # Verify variant structure includes stock
++-        for item in items_with_variants:
++-            for variant in item["variants"]:
++-                assert "name" in variant
++-                assert "price" in variant
++-                assert "stock" in variant, f"Variant {variant['name']} missing stock field"
++-                assert isinstance(variant["stock"], int), f"Variant stock should be int, got {type(variant['stock'])}"
++-        
++-        print(f"✓ GET inventory returns {len(items_with_variants)} items with per-variant stock")
++-
++-
++-class TestOrderVariantStockDeduction:
++-    """Tests for order creation deducting from specific variant stock"""
++-    
++-    @pytest.fixture
++-    def service_token(self):
++-        response = requests.post(f"{BASE_URL}/api/auth/login", json=SERVICE_USER)
++-        return response.json()["access_token"]
++-    
++-    @pytest.fixture
++-    def driver_info(self, service_token):
++-        headers = {"Authorization": f"Bearer {service_token}"}
++-        response = requests.get(f"{BASE_URL}/api/users/drivers", headers=headers)
++-        drivers = response.json()
++-        return drivers[0] if drivers else None
++-    
++-    @pytest.fixture
++-    def test_item_with_stock(self, service_token):
++-        """Create a test item with known variant stock"""
++-        headers = {"Authorization": f"Bearer {service_token}"}
++-        
++-        item_data = {
++-            "name": "TEST_Order_Stock_Item",
++-            "price": 10.00,
++-            "stock": 0,
++-            "variants": [
++-                {"name": "Small", "price": 10.00, "stock": 20},
++-                {"name": "Large", "price": 15.00, "stock": 10}
++-            ]
++-        }
++-        
++-        response = requests.post(f"{BASE_URL}/api/inventory", json=item_data, headers=headers)
++-        assert response.status_code == 200
++-        item = response.json()
++-        yield item
++-        
++-        # Cleanup
++-        requests.delete(f"{BASE_URL}/api/inventory/{item['id']}", headers=headers)
++-    
++-    def test_order_deducts_variant_stock(self, service_token, driver_info, test_item_with_stock):
++-        """Test POST /api/orders with variant_name — verify specific variant stock decremented"""
++-        headers = {"Authorization": f"Bearer {service_token}"}
++-        item = test_item_with_stock
++-        
++-        # Get initial stock
++-        initial_small_stock = item["variants"][0]["stock"]  # 20
++-        initial_large_stock = item["variants"][1]["stock"]  # 10
++-        
++-        # Create order for Small variant (qty=3)
++-        order_data = {
++-            "address": "TEST_Stock_Deduction_Order",
++-            "items": [{
++-                "item_id": item["id"],
++-                "name": f"{item['name']} (Small)",
++-                "price": 10.00,
++-                "quantity": 3,
++-                "variant_name": "Small",
++-                "is_free_gift": False
++-            }],
++-            "total": 30.00,
++-            "order_type": "delivery",
++-            "driver_id": driver_info["id"],
++-            "driver_name": driver_info["username"]
++-        }
++-        
++-        response = requests.post(f"{BASE_URL}/api/orders", json=order_data, headers=headers)
++-        assert response.status_code == 200, f"Failed to create order: {response.text}"
++-        order = response.json()
++-        
++-        # Verify stock was deducted from Small variant only
++-        inv_response = requests.get(f"{BASE_URL}/api/inventory", headers=headers)
++-        items = inv_response.json()
++-        updated_item = next((i for i in items if i["id"] == item["id"]), None)
++-        assert updated_item is not None
++-        
++-        small_variant = next((v for v in updated_item["variants"] if v["name"] == "Small"), None)
++-        large_variant = next((v for v in updated_item["variants"] if v["name"] == "Large"), None)
++-        
++-        assert small_variant["stock"] == initial_small_stock - 3, f"Small stock should be {initial_small_stock - 3}, got {small_variant['stock']}"
++-        assert large_variant["stock"] == initial_large_stock, f"Large stock should remain {initial_large_stock}, got {large_variant['stock']}"
++-        
++-        print(f"✓ Order deducted stock from Small variant: {initial_small_stock} -> {small_variant['stock']}")
++-        print(f"✓ Large variant stock unchanged: {large_variant['stock']}")
++-        
++-        # Cleanup order
++-        requests.delete(f"{BASE_URL}/api/orders/{order['id']}", headers=headers)
++-    
++-    def test_order_insufficient_variant_stock_returns_400(self, service_token, driver_info, test_item_with_stock):
++-        """Test POST /api/orders with quantity exceeding variant stock — verify 400 error"""
++-        headers = {"Authorization": f"Bearer {service_token}"}
++-        item = test_item_with_stock
++-        
++-        # Try to order more than available stock (Large has 10)
++-        order_data = {
++-            "address": "TEST_Insufficient_Stock_Order",
++-            "items": [{
++-                "item_id": item["id"],
++-                "name": f"{item['name']} (Large)",
++-                "price": 15.00,
++-                "quantity": 15,  # More than 10 available
++-                "variant_name": "Large",
++-                "is_free_gift": False
++-            }],
++-            "total": 225.00,
++-            "order_type": "delivery",
++-            "driver_id": driver_info["id"],
++-            "driver_name": driver_info["username"]
++-        }
++-        
++-        response = requests.post(f"{BASE_URL}/api/orders", json=order_data, headers=headers)
++-        assert response.status_code == 400, f"Expected 400, got {response.status_code}: {response.text}"
++-        
++-        error_detail = response.json().get("detail", "")
++-        assert "Insufficient stock" in error_detail or "stock" in error_detail.lower(), f"Expected 'Insufficient stock' error, got: {error_detail}"
++-        
++-        print(f"✓ Order with insufficient variant stock correctly returns 400: {error_detail}")
++-
++-
++-class TestOrderCancelRestoresVariantStock:
++-    """Tests for order cancellation restoring variant-specific stock"""
++-    
++-    @pytest.fixture
++-    def service_token(self):
++-        response = requests.post(f"{BASE_URL}/api/auth/login", json=SERVICE_USER)
++-        return response.json()["access_token"]
++-    
++-    @pytest.fixture
++-    def driver_info(self, service_token):
++-        headers = {"Authorization": f"Bearer {service_token}"}
++-        response = requests.get(f"{BASE_URL}/api/users/drivers", headers=headers)
++-        drivers = response.json()
++-        return drivers[0] if drivers else None
++-    
++-    @pytest.fixture
++-    def test_item_for_cancel(self, service_token):
++-        """Create a test item with known variant stock for cancel test"""
++-        headers = {"Authorization": f"Bearer {service_token}"}
++-        
++-        item_data = {
++-            "name": "TEST_Cancel_Stock_Item",
++-            "price": 12.00,
++-            "stock": 0,
++-            "variants": [
++-                {"name": "Regular", "price": 12.00, "stock": 25},
++-                {"name": "Premium", "price": 18.00, "stock": 15}
++-            ]
++-        }
++-        
++-        response = requests.post(f"{BASE_URL}/api/inventory", json=item_data, headers=headers)
++-        assert response.status_code == 200
++-        item = response.json()
++-        yield item
++-        
++-        # Cleanup
++-        requests.delete(f"{BASE_URL}/api/inventory/{item['id']}", headers=headers)
++-    
++-    def test_cancel_order_restores_variant_stock(self, service_token, driver_info, test_item_for_cancel):
++-        """Test PUT /api/orders/{id}/cancel — verify specific variant stock restored"""
++-        headers = {"Authorization": f"Bearer {service_token}"}
++-        item = test_item_for_cancel
++-        
++-        # Get initial stock
++-        initial_regular_stock = item["variants"][0]["stock"]  # 25
++-        
++-        # Create order for Regular variant (qty=5)
++-        order_data = {
++-            "address": "TEST_Cancel_Restore_Order",
++-            "items": [{
++-                "item_id": item["id"],
++-                "name": f"{item['name']} (Regular)",
++-                "price": 12.00,
++-                "quantity": 5,
++-                "variant_name": "Regular",
++-                "is_free_gift": False
++-            }],
++-            "total": 60.00,
++-            "order_type": "delivery",
++-            "driver_id": driver_info["id"],
++-            "driver_name": driver_info["username"]
++-        }
++-        
++-        response = requests.post(f"{BASE_URL}/api/orders", json=order_data, headers=headers)
++-        assert response.status_code == 200
++-        order = response.json()
++-        order_id = order["id"]
++-        
++-        # Verify stock was deducted
++-        inv_response = requests.get(f"{BASE_URL}/api/inventory", headers=headers)
++-        items = inv_response.json()
++-        updated_item = next((i for i in items if i["id"] == item["id"]), None)
++-        regular_variant = next((v for v in updated_item["variants"] if v["name"] == "Regular"), None)
++-        assert regular_variant["stock"] == initial_regular_stock - 5
++-        print(f"✓ Stock deducted after order: {initial_regular_stock} -> {regular_variant['stock']}")
++-        
++-        # Cancel the order
++-        cancel_response = requests.put(f"{BASE_URL}/api/orders/{order_id}/cancel", headers=headers)
++-        assert cancel_response.status_code == 200, f"Failed to cancel order: {cancel_response.text}"
++-        cancelled_order = cancel_response.json()
++-        assert cancelled_order["status"] == "cancelled"
++-        
++-        # Verify stock was restored
++-        inv_response2 = requests.get(f"{BASE_URL}/api/inventory", headers=headers)
++-        items2 = inv_response2.json()
++-        restored_item = next((i for i in items2 if i["id"] == item["id"]), None)
++-        restored_regular = next((v for v in restored_item["variants"] if v["name"] == "Regular"), None)
++-        
++-        assert restored_regular["stock"] == initial_regular_stock, f"Stock should be restored to {initial_regular_stock}, got {restored_regular['stock']}"
++-        print(f"✓ Stock restored after cancel: {restored_regular['stock']} (original: {initial_regular_stock})")
++-
++-
++-class TestNonVariantProductStock:
++-    """Tests for products without variants using product-level stock"""
++-    
++-    @pytest.fixture
++-    def service_token(self):
++-        response = requests.post(f"{BASE_URL}/api/auth/login", json=SERVICE_USER)
++-        return response.json()["access_token"]
++-    
++-    @pytest.fixture
++-    def driver_info(self, service_token):
++-        headers = {"Authorization": f"Bearer {service_token}"}
++-        response = requests.get(f"{BASE_URL}/api/users/drivers", headers=headers)
++-        drivers = response.json()
++-        return drivers[0] if drivers else None
++-    
++-    @pytest.fixture
++-    def non_variant_item(self, service_token):
++-        """Create a test item without variants"""
++-        headers = {"Authorization": f"Bearer {service_token}"}
++-        
++-        item_data = {
++-            "name": "TEST_NonVariant_Stock_Item",
++-            "price": 8.99,
++-            "stock": 30,  # Product-level stock
++-            "variants": []  # No variants
++-        }
++-        
++-        response = requests.post(f"{BASE_URL}/api/inventory", json=item_data, headers=headers)
++-        assert response.status_code == 200
++-        item = response.json()
++-        yield item
++-        
++-        # Cleanup
++-        requests.delete(f"{BASE_URL}/api/inventory/{item['id']}", headers=headers)
++-    
++-    def test_non_variant_order_uses_product_stock(self, service_token, driver_info, non_variant_item):
++-        """Test order with non-variant product still uses product-level stock"""
++-        headers = {"Authorization": f"Bearer {service_token}"}
++-        item = non_variant_item
++-        
++-        initial_stock = item["stock"]  # 30
++-        
++-        # Create order without variant_name
++-        order_data = {
++-            "address": "TEST_NonVariant_Stock_Order",
++-            "items": [{
++-                "item_id": item["id"],
++-                "name": item["name"],
++-                "price": item["price"],
++-                "quantity": 4,
++-                "variant_name": None,  # No variant
++-                "is_free_gift": False
++-            }],
++-            "total": item["price"] * 4,
++-            "order_type": "pickup",
++-            "driver_id": driver_info["id"],
++-            "driver_name": driver_info["username"]
++-        }
++-        
++-        response = requests.post(f"{BASE_URL}/api/orders", json=order_data, headers=headers)
++-        assert response.status_code == 200, f"Failed to create order: {response.text}"
++-        order = response.json()
++-        
++-        # Verify product-level stock was deducted
++-        inv_response = requests.get(f"{BASE_URL}/api/inventory", headers=headers)
++-        items = inv_response.json()
++-        updated_item = next((i for i in items if i["id"] == item["id"]), None)
++-        
++-        assert updated_item["stock"] == initial_stock - 4, f"Product stock should be {initial_stock - 4}, got {updated_item['stock']}"
++-        print(f"✓ Non-variant product stock deducted: {initial_stock} -> {updated_item['stock']}")
++-        
++-        # Cleanup order
++-        requests.delete(f"{BASE_URL}/api/orders/{order['id']}", headers=headers)
++-    
++-    def test_non_variant_insufficient_stock_returns_400(self, service_token, driver_info, non_variant_item):
++-        """Test order exceeding non-variant product stock returns 400"""
++-        headers = {"Authorization": f"Bearer {service_token}"}
++-        item = non_variant_item
++-        
++-        # Try to order more than available (30)
++-        order_data = {
++-            "address": "TEST_NonVariant_Insufficient_Order",
++-            "items": [{
++-                "item_id": item["id"],
++-                "name": item["name"],
++-                "price": item["price"],
++-                "quantity": 50,  # More than 30 available
++-                "variant_name": None,
++-                "is_free_gift": False
++-            }],
++-            "total": item["price"] * 50,
++-            "order_type": "delivery",
++-            "driver_id": driver_info["id"],
++-            "driver_name": driver_info["username"]
++-        }
++-        
++-        response = requests.post(f"{BASE_URL}/api/orders", json=order_data, headers=headers)
++-        assert response.status_code == 400, f"Expected 400, got {response.status_code}"
++-        
++-        error_detail = response.json().get("detail", "")
++-        assert "Insufficient stock" in error_detail or "stock" in error_detail.lower()
++-        print(f"✓ Non-variant insufficient stock correctly returns 400: {error_detail}")
++-
++-
++-class TestStockTestProduct:
++-    """Tests for the pre-existing 'Stock Test Product' with Small:5 and Large:3"""
++-    
++-    @pytest.fixture
++-    def service_token(self):
++-        response = requests.post(f"{BASE_URL}/api/auth/login", json=SERVICE_USER)
++-        return response.json()["access_token"]
++-    
++-    def test_stock_test_product_exists(self, service_token):
++-        """Verify 'Stock Test Product' exists with correct variant stock"""
++-        headers = {"Authorization": f"Bearer {service_token}"}
++-        
++-        response = requests.get(f"{BASE_URL}/api/inventory", headers=headers)
++-        assert response.status_code == 200
++-        items = response.json()
++-        
++-        stock_test_product = next((i for i in items if i["name"] == "Stock Test Product"), None)
++-        
++-        if stock_test_product:
++-            print(f"✓ Found 'Stock Test Product': {stock_test_product}")
++-            assert len(stock_test_product.get("variants", [])) >= 2, "Should have at least 2 variants"
++-            
++-            small = next((v for v in stock_test_product["variants"] if v["name"] == "Small"), None)
++-            large = next((v for v in stock_test_product["variants"] if v["name"] == "Large"), None)
++-            
++-            if small:
++-                print(f"  Small variant stock: {small.get('stock', 'N/A')}")
++-            if large:
++-                print(f"  Large variant stock: {large.get('stock', 'N/A')}")
++-        else:
++-            print("⚠ 'Stock Test Product' not found - may need to be created")
++-            pytest.skip("Stock Test Product not found in inventory")
++-
++-
++-class TestCleanup:
++-    """Cleanup test data"""
++-    
++-    @pytest.fixture
++-    def service_token(self):
++-        response = requests.post(f"{BASE_URL}/api/auth/login", json=SERVICE_USER)
++-        return response.json()["access_token"]
++-    
++-    def test_cleanup_test_orders(self, service_token):
++-        """Clean up TEST_ prefixed orders"""
++-        headers = {"Authorization": f"Bearer {service_token}"}
++-        response = requests.get(f"{BASE_URL}/api/orders", headers=headers)
++-        orders = response.json()
++-        
++-        deleted_count = 0
++-        for order in orders:
++-            if order["address"].startswith("TEST_"):
++-                delete_response = requests.delete(f"{BASE_URL}/api/orders/{order['id']}", headers=headers)
++-                if delete_response.status_code == 200:
++-                    deleted_count += 1
++-        
++-        print(f"✓ Cleaned up {deleted_count} test orders")
++-    
++-    def test_cleanup_test_inventory(self, service_token):
++-        """Clean up TEST_ prefixed inventory items"""
++-        headers = {"Authorization": f"Bearer {service_token}"}
++-        response = requests.get(f"{BASE_URL}/api/inventory", headers=headers)
++-        items = response.json()
++-        
++-        deleted_count = 0
++-        for item in items:
++-            if item["name"].startswith("TEST_"):
++-                delete_response = requests.delete(f"{BASE_URL}/api/inventory/{item['id']}", headers=headers)
++-                if delete_response.status_code == 200:
++-                    deleted_count += 1
++-        
++-        print(f"✓ Cleaned up {deleted_count} test inventory items")
++-
++-
++-if __name__ == "__main__":
++-    pytest.main([__file__, "-v", "--tb=short"])
+
+commit 2eb00263926b6e4a29beb95540cba8f760b4e3a1
+Author: mrlovelyman5240 <mrlovelyman5240@gmail.com>
+Date:   Sat May 23 18:59:49 2026 +1000
+
+    [base-stock ch7 MEDIUM] strict units_per validation; drop ItemVariant.stock; surface invalid units_per as 'Data error'
+    
+    Codex findings #7, #8, #9:
+    - backend: _resolve_units_per() rejects null-typed, non-int, or <1 stored values with 400 instead of silently coercing 0→1; applied at create_order, cancel_order, delete_order
+    - ItemVariant.stock removed from model (extra='ignore' keeps legacy DB docs from breaking deserialization)
+    - frontend variantUnitsPer returns null for invalid units_per; cart/gift handlers refuse and surface a toast
+    - VariantDialog + GiftSelector show 'Data error' badge + disable selection for invalid variants
+    - test_ui_cleanup_v6 updated to new model (product.stock as source of truth)
+
+diff --git a/backend/models.py b/backend/models.py
+index 5f45eb9..65a5857 100644
+--- a/backend/models.py
++++ b/backend/models.py
+@@ -76,14 +76,13 @@ class TokenResponse(BaseModel):
+ 
+ 
+ class ItemVariant(BaseModel):
++    # Tolerate legacy DB docs that still carry the deprecated per-variant `stock` field.
++    model_config = ConfigDict(extra="ignore")
+     name: str
+     price: float = Field(ge=0)
+     # How many units of the product's base stock this variant consumes per 1 sold.
+     # e.g. AK-47 has base stock 100, variants Q=1, H=2, OZ=4 → selling 1 OZ removes 4 from base.
+     units_per: int = Field(default=1, ge=1)
+-    # Legacy per-variant stock. Kept for backward compatibility with existing data,
+-    # but ignored by the order pipeline — base product stock is the source of truth.
+-    stock: int = Field(default=0, ge=0)
+ 
+ 
+ class InventoryItem(BaseModel):
+diff --git a/backend/routers/orders.py b/backend/routers/orders.py
+index c87348a..d30b323 100644
+--- a/backend/routers/orders.py
++++ b/backend/routers/orders.py
+@@ -11,6 +11,21 @@ from security import create_audit_log, get_current_user, require_role
+ router = APIRouter(prefix="/orders", tags=["orders"])
+ 
+ 
++def _resolve_units_per(raw, label: str) -> int:
++    """Normalize a stored units_per value. Missing → 1 (legacy default).
++    Anything not a positive integer → 400 so corrupt data fails loud instead of
++    silently coercing (which previously masked corruption and 0-coerced data)."""
++    if raw is None:
++        return 1
++    try:
++        value = int(raw)
++    except (TypeError, ValueError):
++        raise HTTPException(status_code=400, detail=f"Invalid units_per for {label}")
++    if value < 1:
++        raise HTTPException(status_code=400, detail=f"Invalid units_per for {label}")
++    return value
++
++
+ @router.get("", response_model=List[Order])
+ async def get_orders(
+     status: Optional[str] = None,
+@@ -81,7 +96,10 @@ async def create_order(
+                     detail=f"Variant {item.variant_name} not found for {inv_item['name']}",
+                 )
+             unit_price = float(variant.get("price", 0))
+-            units_per = int(variant.get("units_per", 1)) or 1
++            units_per = _resolve_units_per(
++                variant.get("units_per"),
++                f"variant {item.variant_name} of {inv_item['name']}",
++            )
+         else:
+             unit_price = float(inv_item.get("price", 0))
+             units_per = 1
+@@ -230,7 +248,7 @@ async def cancel_order(
+     # Restore base stock using units_per snapshotted on each OrderItem at creation
+     # (so later variant changes can't drift the math). Free gifts included.
+     for item in existing["items"]:
+-        units_per = int(item.get("units_per", 1)) or 1
++        units_per = _resolve_units_per(item.get("units_per"), f"order item {item.get('name', '?')}")
+         base_cost = item["quantity"] * units_per
+         await db.inventory.update_one(
+             {"id": item["item_id"]},
+@@ -269,7 +287,7 @@ async def delete_order(
+         deleted = await db.orders.delete_one({"id": order_id, "status": "pending"})
+         if deleted.deleted_count == 1:
+             for item in existing["items"]:
+-                units_per = int(item.get("units_per", 1)) or 1
++                units_per = _resolve_units_per(item.get("units_per"), f"order item {item.get('name', '?')}")
+                 base_cost = item["quantity"] * units_per
+                 await db.inventory.update_one(
+                     {"id": item["item_id"]},
+diff --git a/backend/tests/test_ui_cleanup_v6.py b/backend/tests/test_ui_cleanup_v6.py
+index 03d84c2..7d6a950 100644
+--- a/backend/tests/test_ui_cleanup_v6.py
++++ b/backend/tests/test_ui_cleanup_v6.py
+@@ -157,29 +157,23 @@ class TestDriverCompleteOrder:
+         if not inventory:
+             pytest.skip("No inventory items available")
+         
+-        # Find an item with stock (either product-level or variant-level)
++        # Base-stock model: variants no longer carry stock — product.stock is the
++        # source of truth. Pick the first product with stock; if it has variants,
++        # use the first variant's name/price for the order line.
+         item = None
+         variant_name = None
+         price = 10.0
+-        
++
+         for inv_item in inventory:
+-            # Check if item has variants with stock
+-            if inv_item.get("variants"):
+-                for variant in inv_item["variants"]:
+-                    if variant.get("stock", 0) > 0:
+-                        item = inv_item
+-                        variant_name = variant["name"]
+-                        price = variant["price"]
+-                        break
+-            # Check product-level stock
+-            elif inv_item.get("stock", 0) > 0:
++            if inv_item.get("stock", 0) > 0:
+                 item = inv_item
+-                price = inv_item.get("price", 10.0)
+-                break
+-            
+-            if item:
++                if inv_item.get("variants"):
++                    variant_name = inv_item["variants"][0]["name"]
++                    price = inv_item["variants"][0]["price"]
++                else:
++                    price = inv_item.get("price", 10.0)
+                 break
+-        
++
+         if not item:
+             pytest.skip("No inventory items with stock available")
+         
+@@ -227,27 +221,21 @@ class TestDriverCompleteOrder:
+         if not inventory:
+             pytest.skip("No inventory items available")
+         
+-        # Find an item with stock
++        # Base-stock model: pick a product with stock; use first variant if any.
+         item = None
+         variant_name = None
+         price = 10.0
+-        
++
+         for inv_item in inventory:
+-            if inv_item.get("variants"):
+-                for variant in inv_item["variants"]:
+-                    if variant.get("stock", 0) > 0:
+-                        item = inv_item
+-                        variant_name = variant["name"]
+-                        price = variant["price"]
+-                        break
+-            elif inv_item.get("stock", 0) > 0:
++            if inv_item.get("stock", 0) > 0:
+                 item = inv_item
+-                price = inv_item.get("price", 10.0)
+-                break
+-            
+-            if item:
++                if inv_item.get("variants"):
++                    variant_name = inv_item["variants"][0]["name"]
++                    price = inv_item["variants"][0]["price"]
++                else:
++                    price = inv_item.get("price", 10.0)
+                 break
+-        
++
+         if not item:
+             pytest.skip("No inventory items with stock available")
+         
+diff --git a/frontend/src/pages/service/NewOrder.js b/frontend/src/pages/service/NewOrder.js
+index 8153530..8bb866c 100644
+--- a/frontend/src/pages/service/NewOrder.js
++++ b/frontend/src/pages/service/NewOrder.js
+@@ -56,10 +56,14 @@ const NewOrder = () => {
+   };
+ 
+   // Resolve units_per for a (product, variantName) pair. Non-variant lines = 1.
++  // Returns null if the variant stores a corrupt units_per — callers must refuse
++  // to add/move that line so we don't hide bad data behind silent clamping.
+   const variantUnitsPer = (product, variantName) => {
+     if (!variantName || !product?.variants?.length) return 1;
+     const v = product.variants.find(vv => vv.name === variantName);
+-    return Math.max(1, v?.units_per ?? 1);
++    const raw = v?.units_per;
++    if (raw === undefined || raw === null) return 1;
++    return Number.isInteger(raw) && raw >= 1 ? raw : null;
+   };
+ 
+   // Total base-stock units already committed for a product across the entire cart
+@@ -72,10 +76,13 @@ const NewOrder = () => {
+     cart.forEach((line, idx) => {
+       if (idx === excludeCartIndex) return;
+       if (line.item_id !== productId || line.is_free_gift) return;
+-      consumed += line.quantity * variantUnitsPer(invItem, line.variant_name);
++      const up = variantUnitsPer(invItem, line.variant_name);
++      if (up === null) return; // corrupt — treat as zero so caller still rejects via separate guards
++      consumed += line.quantity * up;
+     });
+     if (selectedGiftOption && selectedGiftOption.item_id === productId) {
+-      consumed += variantUnitsPer(invItem, selectedGiftOption.variant_name);
++      const up = variantUnitsPer(invItem, selectedGiftOption.variant_name);
++      if (up !== null) consumed += up;
+     }
+     return consumed;
+   };
+@@ -102,7 +109,13 @@ const NewOrder = () => {
+ 
+   const handleGiftSelect = (itemId, variantName) => {
+     const invItem = inventory.find(i => i.id === itemId);
+-    if (invItem && remainingBaseStock(itemId) < variantUnitsPer(invItem, variantName)) {
++    if (!invItem) return;
++    const unitsPer = variantUnitsPer(invItem, variantName);
++    if (unitsPer === null) {
++      toast.error('Variant has invalid configuration');
++      return;
++    }
++    if (remainingBaseStock(itemId) < unitsPer) {
+       toast.error('Not enough stock for this gift');
+       return;
+     }
+@@ -124,6 +137,10 @@ const NewOrder = () => {
+ 
+     const variantName = variant?.name || null;
+     const unitsPer = variantUnitsPer(product, variantName);
++    if (unitsPer === null) {
++      toast.error('Variant has invalid configuration');
++      return;
++    }
+     if (remainingBaseStock(product.id) < unitsPer) {
+       toast.error('Not enough stock');
+       return;
+diff --git a/frontend/src/pages/service/new-order/GiftSelector.jsx b/frontend/src/pages/service/new-order/GiftSelector.jsx
+index f7be659..dc47afb 100644
+--- a/frontend/src/pages/service/new-order/GiftSelector.jsx
++++ b/frontend/src/pages/service/new-order/GiftSelector.jsx
+@@ -128,9 +128,13 @@ const GiftSelector = ({ inventory, freeGiftId, selectedGiftOption, onSelect, onC
+                   {hasVariants && isExpanded && (
+                     <div className="bg-muted/40 border-t border-b">
+                       {item.variants.map((v, vIdx) => {
+-                        const unitsPer = Math.max(1, v.units_per ?? 1);
+-                        const vStock = Math.floor(remainingFor(item) / unitsPer);
+-                        const isOutOfStock = vStock <= 0;
++                        const rawUp = v.units_per;
++                        const unitsPerValid = rawUp === undefined || rawUp === null
++                          ? true
++                          : Number.isInteger(rawUp) && rawUp >= 1;
++                        const unitsPer = unitsPerValid ? (rawUp ?? 1) : 1;
++                        const vStock = unitsPerValid ? Math.floor(remainingFor(item) / unitsPer) : 0;
++                        const isOutOfStock = !unitsPerValid || vStock <= 0;
+                         const isSelected = freeGiftId === `${item.id}:::${v.name}`;
+                         return (
+                           <button
+@@ -152,7 +156,7 @@ const GiftSelector = ({ inventory, freeGiftId, selectedGiftOption, onSelect, onC
+                               <span>{v.name}</span>
+                             </div>
+                             <span className={`text-xs ${isOutOfStock ? 'text-destructive' : 'text-muted-foreground'}`}>
+-                              {isOutOfStock ? 'Out' : `${vStock} left`}
++                              {!unitsPerValid ? 'Data error' : isOutOfStock ? 'Out' : `${vStock} left`}
+                             </span>
+                           </button>
+                         );
+diff --git a/frontend/src/pages/service/new-order/VariantDialog.jsx b/frontend/src/pages/service/new-order/VariantDialog.jsx
+index 51d1158..8ff45fe 100644
+--- a/frontend/src/pages/service/new-order/VariantDialog.jsx
++++ b/frontend/src/pages/service/new-order/VariantDialog.jsx
+@@ -50,10 +50,14 @@ const VariantDialog = ({ open, product, onOpenChange, onAddToCart, getRemaining
+               <Label className="text-sm text-muted-foreground">Select Variant</Label>
+               <div className="grid grid-cols-1 gap-2">
+                 {product.variants.map((v, idx) => {
+-                  const unitsPer = Math.max(1, v.units_per ?? 1);
++                  const rawUp = v.units_per;
++                  const unitsPerValid = rawUp === undefined || rawUp === null
++                    ? true
++                    : Number.isInteger(rawUp) && rawUp >= 1;
++                  const unitsPer = unitsPerValid ? (rawUp ?? 1) : 1;
+                   const remaining = getRemaining ? getRemaining(product.id) : (product.stock ?? 0);
+-                  const variantStock = Math.floor(remaining / unitsPer);
+-                  const isOutOfStock = variantStock <= 0;
++                  const variantStock = unitsPerValid ? Math.floor(remaining / unitsPer) : 0;
++                  const isOutOfStock = !unitsPerValid || variantStock <= 0;
+                   return (
+                     <button
+                       key={idx}
+@@ -72,7 +76,7 @@ const VariantDialog = ({ open, product, onOpenChange, onAddToCart, getRemaining
+                       <div>
+                         <span className="font-medium text-sm">{v.name}</span>
+                         <span className={`ml-2 text-xs ${isOutOfStock ? 'text-destructive' : variantStock <= 5 ? 'text-amber-600' : 'text-muted-foreground'}`}>
+-                          {isOutOfStock ? 'Out of stock' : `${variantStock} left`}
++                          {!unitsPerValid ? 'Data error' : isOutOfStock ? 'Out of stock' : `${variantStock} left`}
+                         </span>
+                       </div>
+                       <span className="text-sm font-semibold">{formatCurrency(v.price)}</span>
+
+commit 18b9926df539021b2c6728d9a8e4d71682f9d0ab
+Author: mrlovelyman5240 <mrlovelyman5240@gmail.com>
+Date:   Sat May 23 19:01:08 2026 +1000
+
+    [base-stock ch8 tests] add 9 tests covering delete snapshot, multi-line shared pool + rollback, exact boundaries, free-gift deduction/restore, and units_per corruption
+    
+    Closes Codex test-gap findings #10-#14:
+    - pending delete uses OrderItem snapshot (mutated variant ignored)
+    - cancelled-then-deleted order does not double-restore
+    - multi-line same-product order shares base pool; partial failure rolls back prior deduction
+    - exact boundary, one-over, sub-unit-remainder
+    - free gift variant deducts qty*units_per; cancel restores
+    - negative units_per rejected at create; missing units_per defaults to 1 end-to-end
+
+diff --git a/backend/tests/test_base_stock_tracking.py b/backend/tests/test_base_stock_tracking.py
+index 29fd21c..89e1c8b 100644
+--- a/backend/tests/test_base_stock_tracking.py
++++ b/backend/tests/test_base_stock_tracking.py
+@@ -336,6 +336,289 @@ class TestNonVariantProductStock:
+         assert response.status_code == 400, response.text
+ 
+ 
++class TestDeleteSnapshotIntegrity:
++    """Deleting a pending order restores using the OrderItem.units_per snapshot,
++    not whatever the variant currently stores."""
++
++    @pytest.fixture
++    def item_for_delete(self, service_token):
++        headers = {"Authorization": f"Bearer {service_token}"}
++        item_data = {
++            "name": "TEST_DeleteSnapshot_Item",
++            "price": 10.00,
++            "stock": 50,
++            "variants": [{"name": "Pack of 5", "price": 45.00, "units_per": 5}],
++        }
++        item = requests.post(f"{BASE_URL}/api/inventory", json=item_data, headers=headers).json()
++        yield item
++        requests.delete(f"{BASE_URL}/api/inventory/{item['id']}", headers=headers)
++
++    def test_pending_delete_uses_orderitem_snapshot(self, service_token, driver_info, item_for_delete):
++        headers = {"Authorization": f"Bearer {service_token}"}
++        item = item_for_delete
++
++        order = requests.post(f"{BASE_URL}/api/orders", json={
++            "address": "TEST_DeleteSnapshotOrder",
++            "items": [{
++                "item_id": item["id"], "name": item["name"], "price": 45.00,
++                "quantity": 3, "variant_name": "Pack of 5", "is_free_gift": False,
++            }],
++            "order_type": "delivery",
++            "driver_id": driver_info["id"], "driver_name": driver_info["username"],
++        }, headers=headers).json()
++
++        # Mutate variant.units_per 5 → 20 after order creation
++        requests.put(f"{BASE_URL}/api/inventory/{item['id']}", json={
++            "name": item["name"], "price": item["price"], "stock": item["stock"] - (3 * 5),
++            "variants": [{"name": "Pack of 5", "price": 45.00, "units_per": 20}],
++        }, headers=headers)
++
++        # Delete the pending order — must restore 3*5=15, not 3*20=60
++        delete_response = requests.delete(f"{BASE_URL}/api/orders/{order['id']}", headers=headers)
++        assert delete_response.status_code == 200, delete_response.text
++
++        after = next(i for i in requests.get(f"{BASE_URL}/api/inventory", headers=headers).json() if i["id"] == item["id"])
++        assert after["stock"] == item["stock"], (
++            f"Delete should restore via snapshot to {item['stock']}, got {after['stock']}"
++        )
++
++    def test_cancelled_delete_does_not_double_restore(self, service_token, driver_info, item_for_delete):
++        """A delete on an already-cancelled order must NOT restore stock again
++        (cancellation already did)."""
++        headers = {"Authorization": f"Bearer {service_token}"}
++        item = item_for_delete
++
++        order = requests.post(f"{BASE_URL}/api/orders", json={
++            "address": "TEST_CancelThenDeleteOrder",
++            "items": [{
++                "item_id": item["id"], "name": item["name"], "price": 45.00,
++                "quantity": 2, "variant_name": "Pack of 5", "is_free_gift": False,
++            }],
++            "order_type": "delivery",
++            "driver_id": driver_info["id"], "driver_name": driver_info["username"],
++        }, headers=headers).json()
++
++        requests.put(f"{BASE_URL}/api/orders/{order['id']}/cancel", headers=headers)
++        after_cancel = next(i for i in requests.get(f"{BASE_URL}/api/inventory", headers=headers).json() if i["id"] == item["id"])
++        assert after_cancel["stock"] == item["stock"]  # restored by cancel
++
++        requests.delete(f"{BASE_URL}/api/orders/{order['id']}", headers=headers)
++        after_delete = next(i for i in requests.get(f"{BASE_URL}/api/inventory", headers=headers).json() if i["id"] == item["id"])
++        assert after_delete["stock"] == item["stock"], "Delete on cancelled order must not re-restore"
++
++
++class TestMultiLineSameProduct:
++    """One order with multiple lines pointing at the same product (different variants
++    and one non-variant) consumes from the shared base stock pool, and on failure
++    rolls back every line atomically."""
++
++    @pytest.fixture
++    def shared_pool_item(self, service_token):
++        headers = {"Authorization": f"Bearer {service_token}"}
++        item = requests.post(f"{BASE_URL}/api/inventory", json={
++            "name": "TEST_SharedPool_Item",
++            "price": 10.00,
++            "stock": 100,
++            "variants": [
++                {"name": "Single", "price": 10.00, "units_per": 1},
++                {"name": "Pack of 4", "price": 36.00, "units_per": 4},
++            ],
++        }, headers=headers).json()
++        yield item
++        requests.delete(f"{BASE_URL}/api/inventory/{item['id']}", headers=headers)
++
++    def test_multiple_lines_consume_shared_pool(self, service_token, driver_info, shared_pool_item):
++        headers = {"Authorization": f"Bearer {service_token}"}
++        item = shared_pool_item
++
++        # 5 singles (5) + 10 packs (40) = 45 from base 100
++        order = requests.post(f"{BASE_URL}/api/orders", json={
++            "address": "TEST_SharedPoolOrder",
++            "items": [
++                {"item_id": item["id"], "name": f"{item['name']} (Single)", "price": 10.00,
++                 "quantity": 5, "variant_name": "Single", "is_free_gift": False},
++                {"item_id": item["id"], "name": f"{item['name']} (Pack of 4)", "price": 36.00,
++                 "quantity": 10, "variant_name": "Pack of 4", "is_free_gift": False},
++            ],
++            "order_type": "delivery",
++            "driver_id": driver_info["id"], "driver_name": driver_info["username"],
++        }, headers=headers)
++        assert order.status_code == 200, order.text
++
++        after = next(i for i in requests.get(f"{BASE_URL}/api/inventory", headers=headers).json() if i["id"] == item["id"])
++        assert after["stock"] == 100 - 5 - (10 * 4)
++
++    def test_partial_failure_rolls_back_all_lines(self, service_token, driver_info, shared_pool_item):
++        """Two lines: first fits (deducts), second exceeds → server must roll back
++        the first line's deduction so net change is zero."""
++        headers = {"Authorization": f"Bearer {service_token}"}
++        item = shared_pool_item
++
++        # 20 singles (20) succeeds first; then 30 packs (120) exceeds remaining 80 → fail
++        response = requests.post(f"{BASE_URL}/api/orders", json={
++            "address": "TEST_PartialFailRollback",
++            "items": [
++                {"item_id": item["id"], "name": f"{item['name']} (Single)", "price": 10.00,
++                 "quantity": 20, "variant_name": "Single", "is_free_gift": False},
++                {"item_id": item["id"], "name": f"{item['name']} (Pack of 4)", "price": 36.00,
++                 "quantity": 30, "variant_name": "Pack of 4", "is_free_gift": False},
++            ],
++            "order_type": "delivery",
++            "driver_id": driver_info["id"], "driver_name": driver_info["username"],
++        }, headers=headers)
++        assert response.status_code == 400, response.text
++
++        after = next(i for i in requests.get(f"{BASE_URL}/api/inventory", headers=headers).json() if i["id"] == item["id"])
++        assert after["stock"] == 100, (
++            f"Failed order must roll back prior line deduction; expected 100, got {after['stock']}"
++        )
++
++
++class TestBoundaryStock:
++    """Exact stock/units_per boundaries."""
++
++    @pytest.fixture
++    def small_pack_item(self, service_token):
++        headers = {"Authorization": f"Bearer {service_token}"}
++        item = requests.post(f"{BASE_URL}/api/inventory", json={
++            "name": "TEST_Boundary_Item",
++            "price": 5.00,
++            "stock": 12,
++            "variants": [{"name": "Pack of 6", "price": 25.00, "units_per": 6}],
++        }, headers=headers).json()
++        yield item
++        requests.delete(f"{BASE_URL}/api/inventory/{item['id']}", headers=headers)
++
++    def test_exact_boundary_succeeds(self, service_token, driver_info, small_pack_item):
++        """stock=12, units_per=6, qty=2 → uses exactly 12."""
++        headers = {"Authorization": f"Bearer {service_token}"}
++        item = small_pack_item
++
++        response = requests.post(f"{BASE_URL}/api/orders", json={
++            "address": "TEST_BoundaryExactOrder",
++            "items": [{"item_id": item["id"], "name": item["name"], "price": 25.00,
++                       "quantity": 2, "variant_name": "Pack of 6", "is_free_gift": False}],
++            "order_type": "delivery",
++            "driver_id": driver_info["id"], "driver_name": driver_info["username"],
++        }, headers=headers)
++        assert response.status_code == 200, response.text
++
++        after = next(i for i in requests.get(f"{BASE_URL}/api/inventory", headers=headers).json() if i["id"] == item["id"])
++        assert after["stock"] == 0
++
++    def test_one_over_boundary_fails(self, service_token, driver_info, small_pack_item):
++        """stock=12, units_per=6, qty=3 needs 18 → rejected."""
++        headers = {"Authorization": f"Bearer {service_token}"}
++        item = small_pack_item
++
++        response = requests.post(f"{BASE_URL}/api/orders", json={
++            "address": "TEST_BoundaryOverOrder",
++            "items": [{"item_id": item["id"], "name": item["name"], "price": 25.00,
++                       "quantity": 3, "variant_name": "Pack of 6", "is_free_gift": False}],
++            "order_type": "delivery",
++            "driver_id": driver_info["id"], "driver_name": driver_info["username"],
++        }, headers=headers)
++        assert response.status_code == 400, response.text
++
++    def test_remainder_less_than_one_unit_rejects(self, service_token, driver_info):
++        """stock=5, units_per=6 → max orderable quantity is 0."""
++        headers = {"Authorization": f"Bearer {service_token}"}
++        item = requests.post(f"{BASE_URL}/api/inventory", json={
++            "name": "TEST_RemainderItem", "price": 5.00, "stock": 5,
++            "variants": [{"name": "Pack of 6", "price": 25.00, "units_per": 6}],
++        }, headers=headers).json()
++        try:
++            response = requests.post(f"{BASE_URL}/api/orders", json={
++                "address": "TEST_RemainderOrder",
++                "items": [{"item_id": item["id"], "name": item["name"], "price": 25.00,
++                           "quantity": 1, "variant_name": "Pack of 6", "is_free_gift": False}],
++                "order_type": "delivery",
++                "driver_id": driver_info["id"], "driver_name": driver_info["username"],
++            }, headers=headers)
++            assert response.status_code == 400, response.text
++        finally:
++            requests.delete(f"{BASE_URL}/api/inventory/{item['id']}", headers=headers)
++
++
++class TestFreeGiftStock:
++    """Free gifts deduct base stock at creation and restore on cancel/delete."""
++
++    @pytest.fixture
++    def gift_item(self, service_token):
++        headers = {"Authorization": f"Bearer {service_token}"}
++        item = requests.post(f"{BASE_URL}/api/inventory", json={
++            "name": "TEST_Gift_Item", "price": 8.00, "stock": 20,
++            "variants": [{"name": "Pack of 2", "price": 14.00, "units_per": 2}],
++        }, headers=headers).json()
++        yield item
++        requests.delete(f"{BASE_URL}/api/inventory/{item['id']}", headers=headers)
++
++    def test_free_gift_variant_deducts_units_per(self, service_token, driver_info, gift_item):
++        headers = {"Authorization": f"Bearer {service_token}"}
++        item = gift_item
++
++        order = requests.post(f"{BASE_URL}/api/orders", json={
++            "address": "TEST_GiftDeductOrder",
++            "items": [{"item_id": item["id"], "name": f"{item['name']} (Pack of 2)",
++                       "price": 0.0, "quantity": 1, "variant_name": "Pack of 2",
++                       "is_free_gift": True}],
++            "order_type": "delivery",
++            "driver_id": driver_info["id"], "driver_name": driver_info["username"],
++        }, headers=headers)
++        assert order.status_code == 200, order.text
++
++        after_create = next(i for i in requests.get(f"{BASE_URL}/api/inventory", headers=headers).json() if i["id"] == item["id"])
++        assert after_create["stock"] == 20 - 2  # 1 gift × units_per 2
++
++        requests.put(f"{BASE_URL}/api/orders/{order.json()['id']}/cancel", headers=headers)
++        after_cancel = next(i for i in requests.get(f"{BASE_URL}/api/inventory", headers=headers).json() if i["id"] == item["id"])
++        assert after_cancel["stock"] == 20, "Cancel must restore gift's deducted units"
++
++
++class TestUnitsPerCorruption:
++    """Stored units_per values that aren't positive integers must fail loud, not
++    coerce to 1. (Strict validation added in ch7.)"""
++
++    @pytest.fixture
++    def good_item(self, service_token):
++        headers = {"Authorization": f"Bearer {service_token}"}
++        item = requests.post(f"{BASE_URL}/api/inventory", json={
++            "name": "TEST_CorruptUP_Item", "price": 5.00, "stock": 30,
++            "variants": [{"name": "Normal", "price": 5.00, "units_per": 2}],
++        }, headers=headers).json()
++        yield item
++        requests.delete(f"{BASE_URL}/api/inventory/{item['id']}", headers=headers)
++
++    def test_inventory_create_rejects_negative_units_per(self, service_token):
++        headers = {"Authorization": f"Bearer {service_token}"}
++        response = requests.post(f"{BASE_URL}/api/inventory", json={
++            "name": "TEST_NegUP_Item", "price": 5.00, "stock": 10,
++            "variants": [{"name": "Bad", "price": 5.00, "units_per": -3}],
++        }, headers=headers)
++        assert response.status_code in (400, 422), response.text
++
++    def test_inventory_create_units_per_missing_defaults_to_one(self, service_token, driver_info):
++        """When variant omits units_per entirely, it defaults to 1 and order deduction matches quantity."""
++        headers = {"Authorization": f"Bearer {service_token}"}
++        item = requests.post(f"{BASE_URL}/api/inventory", json={
++            "name": "TEST_MissingUP_Item", "price": 5.00, "stock": 10,
++            "variants": [{"name": "PlainDefault", "price": 5.00}],
++        }, headers=headers).json()
++        try:
++            order = requests.post(f"{BASE_URL}/api/orders", json={
++                "address": "TEST_MissingUPOrder",
++                "items": [{"item_id": item["id"], "name": item["name"], "price": 5.00,
++                           "quantity": 3, "variant_name": "PlainDefault", "is_free_gift": False}],
++                "order_type": "delivery",
++                "driver_id": driver_info["id"], "driver_name": driver_info["username"],
++            }, headers=headers)
++            assert order.status_code == 200, order.text
++            after = next(i for i in requests.get(f"{BASE_URL}/api/inventory", headers=headers).json() if i["id"] == item["id"])
++            assert after["stock"] == 7  # 10 - 3*1
++        finally:
++            requests.delete(f"{BASE_URL}/api/inventory/{item['id']}", headers=headers)
++
++
+ class TestCleanup:
+     def test_cleanup_test_orders(self, service_token):
+         headers = {"Authorization": f"Bearer {service_token}"}

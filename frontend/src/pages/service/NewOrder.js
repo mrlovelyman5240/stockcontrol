@@ -188,6 +188,10 @@ const NewOrder = () => {
     }
     if (inventoryItem) {
       const unitsPer = variantUnitsPer(inventoryItem, item.variant_name);
+      if (unitsPer === null) {
+        toast.error('Variant has invalid configuration — remove this line');
+        return;
+      }
       // Recompute base consumption excluding this line, then see if newQty fits.
       const otherConsumed = baseConsumedForProduct(item.item_id, index);
       if (otherConsumed + newQty * unitsPer > (inventoryItem.stock ?? 0)) {

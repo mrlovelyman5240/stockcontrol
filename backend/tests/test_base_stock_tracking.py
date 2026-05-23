@@ -428,10 +428,12 @@ class TestMultiLineSameProduct:
         requests.delete(f"{BASE_URL}/api/inventory/{item['id']}", headers=headers)
 
     def test_multiple_lines_consume_shared_pool(self, service_token, driver_info, shared_pool_item):
+        """Two variant lines + a non-variant line on the same product all draw
+        from the same base.stock pool."""
         headers = {"Authorization": f"Bearer {service_token}"}
         item = shared_pool_item
 
-        # 5 singles (5) + 10 packs (40) = 45 from base 100
+        # 5 singles (5) + 10 packs (40) + 7 non-variant default units (7) = 52 from base 100
         order = requests.post(f"{BASE_URL}/api/orders", json={
             "address": "TEST_SharedPoolOrder",
             "items": [
@@ -439,6 +441,8 @@ class TestMultiLineSameProduct:
                  "quantity": 5, "variant_name": "Single", "is_free_gift": False},
                 {"item_id": item["id"], "name": f"{item['name']} (Pack of 4)", "price": 36.00,
                  "quantity": 10, "variant_name": "Pack of 4", "is_free_gift": False},
+                {"item_id": item["id"], "name": item["name"], "price": 10.00,
+                 "quantity": 7, "variant_name": None, "is_free_gift": False},
             ],
             "order_type": "delivery",
             "driver_id": driver_info["id"], "driver_name": driver_info["username"],
@@ -446,7 +450,7 @@ class TestMultiLineSameProduct:
         assert order.status_code == 200, order.text
 
         after = next(i for i in requests.get(f"{BASE_URL}/api/inventory", headers=headers).json() if i["id"] == item["id"])
-        assert after["stock"] == 100 - 5 - (10 * 4)
+        assert after["stock"] == 100 - 5 - (10 * 4) - 7
 
     def test_partial_failure_rolls_back_all_lines(self, service_token, driver_info, shared_pool_item):
         """Two lines: first fits (deducts), second exceeds → server must roll back
@@ -573,6 +577,30 @@ class TestFreeGiftStock:
         requests.put(f"{BASE_URL}/api/orders/{order.json()['id']}/cancel", headers=headers)
         after_cancel = next(i for i in requests.get(f"{BASE_URL}/api/inventory", headers=headers).json() if i["id"] == item["id"])
         assert after_cancel["stock"] == 20, "Cancel must restore gift's deducted units"
+
+    def test_free_gift_delete_restores_stock(self, service_token, driver_info, gift_item):
+        """Deleting a pending order that included a free gift must restore the
+        gift's base-stock consumption too (not just paid items)."""
+        headers = {"Authorization": f"Bearer {service_token}"}
+        item = gift_item
+
+        order = requests.post(f"{BASE_URL}/api/orders", json={
+            "address": "TEST_GiftDeleteOrder",
+            "items": [{"item_id": item["id"], "name": f"{item['name']} (Pack of 2)",
+                       "price": 0.0, "quantity": 1, "variant_name": "Pack of 2",
+                       "is_free_gift": True}],
+            "order_type": "delivery",
+            "driver_id": driver_info["id"], "driver_name": driver_info["username"],
+        }, headers=headers).json()
+
+        after_create = next(i for i in requests.get(f"{BASE_URL}/api/inventory", headers=headers).json() if i["id"] == item["id"])
+        assert after_create["stock"] == 20 - 2
+
+        delete_response = requests.delete(f"{BASE_URL}/api/orders/{order['id']}", headers=headers)
+        assert delete_response.status_code == 200, delete_response.text
+
+        after_delete = next(i for i in requests.get(f"{BASE_URL}/api/inventory", headers=headers).json() if i["id"] == item["id"])
+        assert after_delete["stock"] == 20, "Delete must restore gift's deducted units"
 
 
 class TestUnitsPerCorruption:
