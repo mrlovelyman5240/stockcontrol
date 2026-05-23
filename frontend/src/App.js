@@ -3,6 +3,7 @@ import { Toaster } from "sonner";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import Layout from "./components/Layout";
+import PWAUpdatePrompt from "./components/PWAUpdatePrompt";
 import "@/App.css";
 
 // Pages
@@ -257,14 +258,15 @@ function App() {
       <AuthProvider>
         <BrowserRouter>
           <AppRoutes />
-          <Toaster 
-            position="top-center" 
-            richColors 
+          <Toaster
+            position="top-center"
+            richColors
             closeButton
             toastOptions={{
               duration: 3000,
             }}
           />
+          <PWAUpdatePrompt />
         </BrowserRouter>
       </AuthProvider>
     </ThemeProvider>

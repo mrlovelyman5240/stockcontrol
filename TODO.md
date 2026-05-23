@@ -67,14 +67,16 @@ Mevcut görünümü modernleştirme ve tutarlılık.
 
 ## FAZ 4 — PWA (mobile-friendly)
 
-- [ ] **4.1** `frontend/public/manifest.json`'ı doğrula: name, short_name, theme_color, background_color, ikonlar (192px + 512px), `start_url`, `display: standalone`.
-- [ ] **4.2** Service worker'a versiyon stratejisi ekle: build-time hash, eski cache'i sil.
-- [ ] **4.3** Static asset'leri cache-first strateji (`/static/*`).
-- [ ] **4.4** API çağrıları için network-first + fallback (offline'da "internet yok" ekranı).
-- [ ] **4.5** "Yeni sürüm var, yenile" prompt'u ekle.
-- [ ] **4.6** Auth token'ı `localStorage` → `HttpOnly cookie`'ye taşı (XSS koruması). Backend `Set-Cookie` döndürsün, frontend `credentials: 'include'` kullansın.
-- [ ] **4.7** Splash screen ikonları ekle (iOS için `apple-touch-icon`).
-- [ ] **4.8** Lighthouse PWA skoru 90+ olana kadar düzelt.
+`vite-plugin-pwa` + `workbox-window` ile tek seferde 4.1-4.5 kapatıldı. Manifest ve service worker artık build-time generate ediliyor (`dist/manifest.webmanifest`, `dist/sw.js`, hashed `workbox-*.js`).
+
+- [x] **4.1** Manifest: `id`/`scope`/`start_url` eklendi, mevcut name/icons/theme/shortcuts korundu. Plugin tarafından `manifest.webmanifest` olarak üretiliyor.
+- [x] **4.2** Workbox build-time hash + `cleanupOutdatedCaches: true` — her deploy eski cache versiyonlarını siler.
+- [x] **4.3** `/assets/*` (Vite output) → `CacheFirst` runtime caching (immutable hashed filenames).
+- [x] **4.4** `/api/*` → `NetworkFirst` with 5s timeout, fallback to cache (offline'da son cache'lenmiş response).
+- [x] **4.5** `PWAUpdatePrompt` component'i `useRegisterSW` hook'u ile "Yeni sürüm hazır → Yenile/Sonra" prompt'u gösteriyor; offline-ready bildirimi de aynı surface'te.
+- [ ] **4.6** Auth token'ı `localStorage` → `HttpOnly cookie`'ye taşı (XSS koruması). Backend `Set-Cookie` döndürsün, frontend `credentials: 'include'` kullansın. (Ayrı chunk — backend + frontend coordinated change.)
+- [x] **4.7** `apple-touch-icon.png` zaten mevcut, manifest'te ve index.html'de link var. (iOS farklı device boyutları için optional splash variants ilerleyen aşamada eklenebilir.)
+- [ ] **4.8** Lighthouse PWA skoru 90+: tarayıcıda Mixy tarafından test edilecek (CI'a lighthouse-ci eklenmesi ayrı bir görev).
 
 ---
 
