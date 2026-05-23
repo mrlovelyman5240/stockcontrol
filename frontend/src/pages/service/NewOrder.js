@@ -6,12 +6,12 @@ import { Input } from '../../components/ui/input';
 import { Label } from '../../components/ui/label';
 import { Badge } from '../../components/ui/badge';
 import { ScrollArea } from '../../components/ui/scroll-area';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../../components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/popover';
 import { inventoryApi, ordersApi, usersApi } from '../../lib/api';
 import { formatCurrency, getApiErrorMessage } from '../../lib/utils';
 import { toast } from 'sonner';
+import DriverSelect from './new-order/DriverSelect';
 import { 
   ShoppingCart, 
   Plus, 
@@ -23,7 +23,6 @@ import {
   Check,
   Search,
   Truck,
-  User,
   ShoppingBag,
   MessageSquare,
   Layers,
@@ -350,27 +349,7 @@ const NewOrder = () => {
 
       {/* Driver + Free Gift row */}
       <div className="grid grid-cols-2 gap-3 mb-4">
-        <div>
-          <Label className="flex items-center gap-1 mb-1.5 text-xs font-medium text-muted-foreground">
-            <Truck className="h-3 w-3" />
-            Driver <span className="text-destructive">*</span>
-          </Label>
-          <Select value={selectedDriver} onValueChange={setSelectedDriver}>
-            <SelectTrigger className="h-10" data-testid="driver-select">
-              <SelectValue placeholder="Select driver" />
-            </SelectTrigger>
-            <SelectContent>
-              {drivers.map((driver) => (
-                <SelectItem key={driver.id} value={driver.id}>
-                  <span className="flex items-center gap-2">
-                    <User className="h-3 w-3" />
-                    {driver.username}
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        <DriverSelect drivers={drivers} value={selectedDriver} onChange={setSelectedDriver} />
         <div>
           <Label className="flex items-center gap-1 mb-1.5 text-xs font-medium text-muted-foreground">
             <Gift className="h-3 w-3" />
