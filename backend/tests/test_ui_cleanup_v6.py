@@ -157,29 +157,23 @@ class TestDriverCompleteOrder:
         if not inventory:
             pytest.skip("No inventory items available")
         
-        # Find an item with stock (either product-level or variant-level)
+        # Base-stock model: variants no longer carry stock — product.stock is the
+        # source of truth. Pick the first product with stock; if it has variants,
+        # use the first variant's name/price for the order line.
         item = None
         variant_name = None
         price = 10.0
-        
+
         for inv_item in inventory:
-            # Check if item has variants with stock
-            if inv_item.get("variants"):
-                for variant in inv_item["variants"]:
-                    if variant.get("stock", 0) > 0:
-                        item = inv_item
-                        variant_name = variant["name"]
-                        price = variant["price"]
-                        break
-            # Check product-level stock
-            elif inv_item.get("stock", 0) > 0:
+            if inv_item.get("stock", 0) > 0:
                 item = inv_item
-                price = inv_item.get("price", 10.0)
+                if inv_item.get("variants"):
+                    variant_name = inv_item["variants"][0]["name"]
+                    price = inv_item["variants"][0]["price"]
+                else:
+                    price = inv_item.get("price", 10.0)
                 break
-            
-            if item:
-                break
-        
+
         if not item:
             pytest.skip("No inventory items with stock available")
         
@@ -227,27 +221,21 @@ class TestDriverCompleteOrder:
         if not inventory:
             pytest.skip("No inventory items available")
         
-        # Find an item with stock
+        # Base-stock model: pick a product with stock; use first variant if any.
         item = None
         variant_name = None
         price = 10.0
-        
+
         for inv_item in inventory:
-            if inv_item.get("variants"):
-                for variant in inv_item["variants"]:
-                    if variant.get("stock", 0) > 0:
-                        item = inv_item
-                        variant_name = variant["name"]
-                        price = variant["price"]
-                        break
-            elif inv_item.get("stock", 0) > 0:
+            if inv_item.get("stock", 0) > 0:
                 item = inv_item
-                price = inv_item.get("price", 10.0)
+                if inv_item.get("variants"):
+                    variant_name = inv_item["variants"][0]["name"]
+                    price = inv_item["variants"][0]["price"]
+                else:
+                    price = inv_item.get("price", 10.0)
                 break
-            
-            if item:
-                break
-        
+
         if not item:
             pytest.skip("No inventory items with stock available")
         

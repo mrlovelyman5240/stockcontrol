@@ -76,14 +76,13 @@ class TokenResponse(BaseModel):
 
 
 class ItemVariant(BaseModel):
+    # Tolerate legacy DB docs that still carry the deprecated per-variant `stock` field.
+    model_config = ConfigDict(extra="ignore")
     name: str
     price: float = Field(ge=0)
     # How many units of the product's base stock this variant consumes per 1 sold.
     # e.g. AK-47 has base stock 100, variants Q=1, H=2, OZ=4 → selling 1 OZ removes 4 from base.
     units_per: int = Field(default=1, ge=1)
-    # Legacy per-variant stock. Kept for backward compatibility with existing data,
-    # but ignored by the order pipeline — base product stock is the source of truth.
-    stock: int = Field(default=0, ge=0)
 
 
 class InventoryItem(BaseModel):

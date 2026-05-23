@@ -50,10 +50,14 @@ const VariantDialog = ({ open, product, onOpenChange, onAddToCart, getRemaining 
               <Label className="text-sm text-muted-foreground">Select Variant</Label>
               <div className="grid grid-cols-1 gap-2">
                 {product.variants.map((v, idx) => {
-                  const unitsPer = Math.max(1, v.units_per ?? 1);
+                  const rawUp = v.units_per;
+                  const unitsPerValid = rawUp === undefined || rawUp === null
+                    ? true
+                    : Number.isInteger(rawUp) && rawUp >= 1;
+                  const unitsPer = unitsPerValid ? (rawUp ?? 1) : 1;
                   const remaining = getRemaining ? getRemaining(product.id) : (product.stock ?? 0);
-                  const variantStock = Math.floor(remaining / unitsPer);
-                  const isOutOfStock = variantStock <= 0;
+                  const variantStock = unitsPerValid ? Math.floor(remaining / unitsPer) : 0;
+                  const isOutOfStock = !unitsPerValid || variantStock <= 0;
                   return (
                     <button
                       key={idx}
@@ -72,7 +76,7 @@ const VariantDialog = ({ open, product, onOpenChange, onAddToCart, getRemaining 
                       <div>
                         <span className="font-medium text-sm">{v.name}</span>
                         <span className={`ml-2 text-xs ${isOutOfStock ? 'text-destructive' : variantStock <= 5 ? 'text-amber-600' : 'text-muted-foreground'}`}>
-                          {isOutOfStock ? 'Out of stock' : `${variantStock} left`}
+                          {!unitsPerValid ? 'Data error' : isOutOfStock ? 'Out of stock' : `${variantStock} left`}
                         </span>
                       </div>
                       <span className="text-sm font-semibold">{formatCurrency(v.price)}</span>

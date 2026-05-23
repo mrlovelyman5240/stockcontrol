@@ -11,6 +11,21 @@ from security import create_audit_log, get_current_user, require_role
 router = APIRouter(prefix="/orders", tags=["orders"])
 
 
+def _resolve_units_per(raw, label: str) -> int:
+    """Normalize a stored units_per value. Missing → 1 (legacy default).
+    Anything not a positive integer → 400 so corrupt data fails loud instead of
+    silently coercing (which previously masked corruption and 0-coerced data)."""
+    if raw is None:
+        return 1
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail=f"Invalid units_per for {label}")
+    if value < 1:
+        raise HTTPException(status_code=400, detail=f"Invalid units_per for {label}")
+    return value
+
+
 @router.get("", response_model=List[Order])
 async def get_orders(
     status: Optional[str] = None,
@@ -81,7 +96,10 @@ async def create_order(
                     detail=f"Variant {item.variant_name} not found for {inv_item['name']}",
                 )
             unit_price = float(variant.get("price", 0))
-            units_per = int(variant.get("units_per", 1)) or 1
+            units_per = _resolve_units_per(
+                variant.get("units_per"),
+                f"variant {item.variant_name} of {inv_item['name']}",
+            )
         else:
             unit_price = float(inv_item.get("price", 0))
             units_per = 1
@@ -230,7 +248,7 @@ async def cancel_order(
     # Restore base stock using units_per snapshotted on each OrderItem at creation
     # (so later variant changes can't drift the math). Free gifts included.
     for item in existing["items"]:
-        units_per = int(item.get("units_per", 1)) or 1
+        units_per = _resolve_units_per(item.get("units_per"), f"order item {item.get('name', '?')}")
         base_cost = item["quantity"] * units_per
         await db.inventory.update_one(
             {"id": item["item_id"]},
@@ -269,7 +287,7 @@ async def delete_order(
         deleted = await db.orders.delete_one({"id": order_id, "status": "pending"})
         if deleted.deleted_count == 1:
             for item in existing["items"]:
-                units_per = int(item.get("units_per", 1)) or 1
+                units_per = _resolve_units_per(item.get("units_per"), f"order item {item.get('name', '?')}")
                 base_cost = item["quantity"] * units_per
                 await db.inventory.update_one(
                     {"id": item["item_id"]},

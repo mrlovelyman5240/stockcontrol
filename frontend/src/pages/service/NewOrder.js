@@ -56,10 +56,14 @@ const NewOrder = () => {
   };
 
   // Resolve units_per for a (product, variantName) pair. Non-variant lines = 1.
+  // Returns null if the variant stores a corrupt units_per — callers must refuse
+  // to add/move that line so we don't hide bad data behind silent clamping.
   const variantUnitsPer = (product, variantName) => {
     if (!variantName || !product?.variants?.length) return 1;
     const v = product.variants.find(vv => vv.name === variantName);
-    return Math.max(1, v?.units_per ?? 1);
+    const raw = v?.units_per;
+    if (raw === undefined || raw === null) return 1;
+    return Number.isInteger(raw) && raw >= 1 ? raw : null;
   };
 
   // Total base-stock units already committed for a product across the entire cart
@@ -72,10 +76,13 @@ const NewOrder = () => {
     cart.forEach((line, idx) => {
       if (idx === excludeCartIndex) return;
       if (line.item_id !== productId || line.is_free_gift) return;
-      consumed += line.quantity * variantUnitsPer(invItem, line.variant_name);
+      const up = variantUnitsPer(invItem, line.variant_name);
+      if (up === null) return; // corrupt — treat as zero so caller still rejects via separate guards
+      consumed += line.quantity * up;
     });
     if (selectedGiftOption && selectedGiftOption.item_id === productId) {
-      consumed += variantUnitsPer(invItem, selectedGiftOption.variant_name);
+      const up = variantUnitsPer(invItem, selectedGiftOption.variant_name);
+      if (up !== null) consumed += up;
     }
     return consumed;
   };
@@ -102,7 +109,13 @@ const NewOrder = () => {
 
   const handleGiftSelect = (itemId, variantName) => {
     const invItem = inventory.find(i => i.id === itemId);
-    if (invItem && remainingBaseStock(itemId) < variantUnitsPer(invItem, variantName)) {
+    if (!invItem) return;
+    const unitsPer = variantUnitsPer(invItem, variantName);
+    if (unitsPer === null) {
+      toast.error('Variant has invalid configuration');
+      return;
+    }
+    if (remainingBaseStock(itemId) < unitsPer) {
       toast.error('Not enough stock for this gift');
       return;
     }
@@ -124,6 +137,10 @@ const NewOrder = () => {
 
     const variantName = variant?.name || null;
     const unitsPer = variantUnitsPer(product, variantName);
+    if (unitsPer === null) {
+      toast.error('Variant has invalid configuration');
+      return;
+    }
     if (remainingBaseStock(product.id) < unitsPer) {
       toast.error('Not enough stock');
       return;

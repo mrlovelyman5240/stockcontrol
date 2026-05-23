@@ -128,9 +128,13 @@ const GiftSelector = ({ inventory, freeGiftId, selectedGiftOption, onSelect, onC
                   {hasVariants && isExpanded && (
                     <div className="bg-muted/40 border-t border-b">
                       {item.variants.map((v, vIdx) => {
-                        const unitsPer = Math.max(1, v.units_per ?? 1);
-                        const vStock = Math.floor(remainingFor(item) / unitsPer);
-                        const isOutOfStock = vStock <= 0;
+                        const rawUp = v.units_per;
+                        const unitsPerValid = rawUp === undefined || rawUp === null
+                          ? true
+                          : Number.isInteger(rawUp) && rawUp >= 1;
+                        const unitsPer = unitsPerValid ? (rawUp ?? 1) : 1;
+                        const vStock = unitsPerValid ? Math.floor(remainingFor(item) / unitsPer) : 0;
+                        const isOutOfStock = !unitsPerValid || vStock <= 0;
                         const isSelected = freeGiftId === `${item.id}:::${v.name}`;
                         return (
                           <button
@@ -152,7 +156,7 @@ const GiftSelector = ({ inventory, freeGiftId, selectedGiftOption, onSelect, onC
                               <span>{v.name}</span>
                             </div>
                             <span className={`text-xs ${isOutOfStock ? 'text-destructive' : 'text-muted-foreground'}`}>
-                              {isOutOfStock ? 'Out' : `${vStock} left`}
+                              {!unitsPerValid ? 'Data error' : isOutOfStock ? 'Out' : `${vStock} left`}
                             </span>
                           </button>
                         );
