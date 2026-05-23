@@ -78,6 +78,11 @@ class TokenResponse(BaseModel):
 class ItemVariant(BaseModel):
     name: str
     price: float = Field(ge=0)
+    # How many units of the product's base stock this variant consumes per 1 sold.
+    # e.g. AK-47 has base stock 100, variants Q=1, H=2, OZ=4 → selling 1 OZ removes 4 from base.
+    units_per: int = Field(default=1, ge=1)
+    # Legacy per-variant stock. Kept for backward compatibility with existing data,
+    # but ignored by the order pipeline — base product stock is the source of truth.
     stock: int = Field(default=0, ge=0)
 
 
@@ -116,6 +121,10 @@ class OrderItem(BaseModel):
     quantity: int
     variant_name: Optional[str] = None
     is_free_gift: bool = False
+    # Snapshotted at order creation so cancel/delete restores the right base-stock
+    # amount even if the variant's units_per changes later. Defaults to 1 so old
+    # orders (created before this field existed) restore at quantity * 1.
+    units_per: int = Field(default=1, ge=1)
 
 
 class Order(BaseModel):

@@ -60,8 +60,11 @@ async def create_order(
     if not order_data.items:
         raise HTTPException(status_code=400, detail="Order must contain at least one item")
 
-    # Resolve authoritative price from DB for each item; never trust client price/total.
+    # Resolve authoritative price + base-stock cost from DB for each item; never trust client.
+    # `base_cost` = how many units of product.stock this line consumes (= quantity for non-variant
+    # items, or quantity * variant.units_per for variant items).
     resolved_items: List[OrderItem] = []
+    base_costs: List[int] = []
     for item in order_data.items:
         if item.quantity <= 0:
             raise HTTPException(status_code=400, detail=f"Invalid quantity for {item.name}")
@@ -78,8 +81,11 @@ async def create_order(
                     detail=f"Variant {item.variant_name} not found for {inv_item['name']}",
                 )
             unit_price = float(variant.get("price", 0))
+            units_per = int(variant.get("units_per", 1)) or 1
         else:
             unit_price = float(inv_item.get("price", 0))
+            units_per = 1
+        base_cost = item.quantity * units_per
 
         resolved_items.append(
             OrderItem(
@@ -89,42 +95,29 @@ async def create_order(
                 quantity=item.quantity,
                 variant_name=item.variant_name,
                 is_free_gift=item.is_free_gift,
+                units_per=units_per,
             )
         )
+        base_costs.append(base_cost)
 
-    # Atomically deduct inventory; rollback prior deductions if any fails (race-safe).
+    # Atomically deduct base stock with a $gte guard; rollback prior deductions if any fails.
     # Free gifts also deduct stock — they are real items leaving the warehouse.
-    deducted: List[OrderItem] = []
-    for item in resolved_items:
-        if item.variant_name:
-            result = await db.inventory.update_one(
-                {
-                    "id": item.item_id,
-                    "variants": {"$elemMatch": {"name": item.variant_name, "stock": {"$gte": item.quantity}}},
-                },
-                {"$inc": {"variants.$.stock": -item.quantity}},
-            )
-        else:
-            result = await db.inventory.update_one(
-                {"id": item.item_id, "stock": {"$gte": item.quantity}},
-                {"$inc": {"stock": -item.quantity}},
-            )
+    deducted: List[tuple] = []  # list of (item_id, base_cost)
+    for item, base_cost in zip(resolved_items, base_costs):
+        result = await db.inventory.update_one(
+            {"id": item.item_id, "stock": {"$gte": base_cost}},
+            {"$inc": {"stock": -base_cost}},
+        )
 
         if result.modified_count == 0:
-            for done in deducted:
-                if done.variant_name:
-                    await db.inventory.update_one(
-                        {"id": done.item_id, "variants.name": done.variant_name},
-                        {"$inc": {"variants.$.stock": done.quantity}},
-                    )
-                else:
-                    await db.inventory.update_one(
-                        {"id": done.item_id},
-                        {"$inc": {"stock": done.quantity}},
-                    )
+            for done_id, done_cost in deducted:
+                await db.inventory.update_one(
+                    {"id": done_id},
+                    {"$inc": {"stock": done_cost}},
+                )
             raise HTTPException(status_code=400, detail=f"Insufficient stock for {item.name}")
 
-        deducted.append(item)
+        deducted.append((item.item_id, base_cost))
 
     total = round(sum(i.price * i.quantity for i in resolved_items), 2)
 
@@ -215,18 +208,16 @@ async def cancel_order(
     if existing["status"] != "pending":
         raise HTTPException(status_code=400, detail="Only pending orders can be cancelled")
 
-    # Restore inventory for cancelled order (free gifts included — they were deducted at creation)
+    # Restore base stock for cancelled order using the units_per snapshotted on each
+    # OrderItem at creation time (so later variant changes can't drift the math).
+    # Free gifts included — they were deducted at creation.
     for item in existing["items"]:
-        if item.get("variant_name"):
-            await db.inventory.update_one(
-                {"id": item["item_id"], "variants.name": item["variant_name"]},
-                {"$inc": {"variants.$.stock": item["quantity"]}},
-            )
-        else:
-            await db.inventory.update_one(
-                {"id": item["item_id"]},
-                {"$inc": {"stock": item["quantity"]}},
-            )
+        units_per = int(item.get("units_per", 1)) or 1
+        base_cost = item["quantity"] * units_per
+        await db.inventory.update_one(
+            {"id": item["item_id"]},
+            {"$inc": {"stock": base_cost}},
+        )
 
     await db.orders.update_one(
         {"id": order_id},
@@ -262,20 +253,17 @@ async def delete_order(
     if not existing:
         raise HTTPException(status_code=404, detail="Order not found")
 
-    # Restore inventory only for pending orders. Cancelled orders already returned
-    # stock at cancellation; completed orders' goods have been delivered.
+    # Restore base stock only for pending orders, using OrderItem.units_per snapshot.
+    # Cancelled orders already returned stock at cancellation; completed orders' goods
+    # have been delivered.
     if existing.get("status") == "pending":
         for item in existing["items"]:
-            if item.get("variant_name"):
-                await db.inventory.update_one(
-                    {"id": item["item_id"], "variants.name": item["variant_name"]},
-                    {"$inc": {"variants.$.stock": item["quantity"]}},
-                )
-            else:
-                await db.inventory.update_one(
-                    {"id": item["item_id"]},
-                    {"$inc": {"stock": item["quantity"]}},
-                )
+            units_per = int(item.get("units_per", 1)) or 1
+            base_cost = item["quantity"] * units_per
+            await db.inventory.update_one(
+                {"id": item["item_id"]},
+                {"$inc": {"stock": base_cost}},
+            )
 
     await db.orders.delete_one({"id": order_id})
 
